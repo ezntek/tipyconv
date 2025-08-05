@@ -9,6 +9,7 @@
  * https://spdx.org/licenses/BSD-3-Clause.html.
  */
 #define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 
 #include <stdio.h>
 
@@ -39,7 +40,7 @@ void disasm_string(const char* title, const char* data, usize len) {
 }
 
 u16 disasm_num(const char* title, const char* data) {
-    u16 res = (u16)(data[0]) | (u16)(data[1] << 8);
+    u16 res = (u16)((u8)(data[0]) | (u8)(data[1] << 8));
     printf("\033[1m%s: \033[0m%d\n", title, res);
     return res;
 }
@@ -49,7 +50,7 @@ void disasm(const char* data, usize len) {
     disasm_bytes("hdr", &data[0], 11);
     disasm_string("finfo", &data[0xB], 42);
     disasm_num("dsize", &data[0x35]);
-    disasm_bytes("fill", &data[0x37], 2);
+    disasm_bytes("psize", &data[0x39], 2);
     disasm_num("psize", &data[0x39]);
     disasm_bytes("vid", &data[0x3B], 1);
     disasm_string("vname", &data[0x3C], 8);
@@ -112,7 +113,6 @@ int main(int argc, char** argv) {
             usize len = tipyfile_dump(&f, &res);
             tipyfile_free(&f);
 
-            disasm_bytes("whole file\n", res, len);
             disasm(res, len);
 
             free(res);
@@ -128,11 +128,32 @@ int main(int argc, char** argv) {
         panic("failed to read file contents");
     }
 
-    disasm(file_contents.data, file_contents.len);
+    info("loaded file \"%.*s\".", (int)filename.len, filename.data);
 
-    // a_string_free(&res);
+    TiPyParseResult res = {0};
+    TiPyFile pyfile =
+        tipyfile_parse(file_contents.data, file_contents.len, &res);
+
+    switch (res) {
+        case TIPY_PARSE_OK: {
+            info("successfully parsed");
+        } break;
+        case TIPY_PARSE_ERROR: {
+            fatal("failed to parse");
+        } break;
+        case TIPY_INVALID_FORMAT: {
+            fatal("invalid file format");
+        } break;
+        case TIPY_CHECKSUM_INCORRECT: {
+            fatal("incorrect checksum");
+        } break;
+    }
+
+    eprintf("\033[1m===== beginning of extracted source =====\n\033[0m");
+    printf("%s\n", pyfile.src);
+
+    tipyfile_free(&pyfile);
     a_string_free(&file_contents);
-
     a_string_free(&filename);
     return 0;
 }

@@ -23,6 +23,8 @@ endif
 tipyconv: setup $(OBJ) $(HEADERS)
 	$(CC) $(LIBS) $(CFLAGS) -o tipyconv $(OBJ) $(3RDPARTY_OBJ)
 
+tipyconv.o: tipyconv.h
+
 setup: deps
 
 dep_asv:

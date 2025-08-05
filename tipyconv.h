@@ -37,6 +37,13 @@ typedef struct {
     char var_name[8];
 } TiPyFile;
 
+typedef enum {
+    TIPY_PARSE_OK = 0,
+    TIPY_PARSE_ERROR = 1,
+    TIPY_INVALID_FORMAT = 2,
+    TIPY_CHECKSUM_INCORRECT = 3,
+} TiPyParseResult;
+
 /**
  * Creates a new TiPyFile with minimal metadata.
  *
@@ -46,6 +53,7 @@ typedef struct {
  * @param src source code
  * @param src_len source code length
  * @param var_name variable name in calculator
+ * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
 TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name);
 
@@ -59,6 +67,7 @@ TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name);
  * @param file_name long form file name
  * @param file_info file info
  * @param var_name variable name in calculator
+ * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
 TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
                                     const char* file_info,
@@ -78,6 +87,7 @@ TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
  * @param file_name_len file name length
  * @param file_info file info
  * @param var_name variable name in calculator
+ * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
 TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
                                          const char* file_name,
@@ -85,6 +95,23 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
                                          const char* file_info,
                                          const char* var_name);
 
+/**
+ * Parses a binary file and returns a TiPyFile.
+ *
+ * Asserts that data != NULL.
+ * Assumes the binary stream is at least >11 to check for the file header.
+ * May segfault.
+ *
+ * @param data binary data of TI AppVar
+ * @param len length of data
+ * @param pres result of the parser, if any. Can be left null
+ * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
+ */
+TiPyFile tipyfile_parse(char* data, usize len, TiPyParseResult* pres);
+
+/**
+ * Creates an invalid TiPyFile. Used to report errors.
+ */
 TiPyFile tipyfile_new_invalid(void);
 
 /**
@@ -186,16 +213,12 @@ static a_vector_u8 _tipyfile_dump_payload(TiPyFile* f) {
     return res;
 }
 
-// only call this when the whole file thus far has been populated!
-static u16 _tipyfile_get_checksum(a_vector_u8* res) {
+static u16 _tipyfile_get_checksum(const char* data, usize len) {
     u32 sum = 0;
-    for (usize i = 0x37; i < res->len; i++) {
-        sum += res->data[i];
+    for (usize i = 0x37; i < len; i++) {
+        sum += data[i];
     }
-    if (sum > 1 << 16) {
-        sum = sum % 1 << 16;
-    }
-    return (u16)sum;
+    return (u16)(sum & 0xffff);
 }
 
 usize tipyfile_dump(TiPyFile* f, char** dest) {
@@ -242,13 +265,82 @@ usize tipyfile_dump(TiPyFile* f, char** dest) {
     a_vector_u8_append_vector(&res, &payload);
 
     // checksum
-    u16 checksum = _tipyfile_get_checksum(&res);
+    u16 checksum = _tipyfile_get_checksum((char*)res.data, res.len);
     a_vector_u8_append_slice(&res, BSWORD(checksum), 2);
 
     a_vector_u8_free(&payload);
 
     *dest = (char*)res.data;
     return res.len;
+}
+
+static u16 _tipyfile_get_word(char data[2]) {
+    return (u16)((u8)(data[0]) | (u8)data[1] << 8);
+}
+
+TiPyFile tipyfile_parse(char* data, usize len, TiPyParseResult* pres) {
+    if (!data) {
+        if (pres)
+            *pres = TIPY_PARSE_ERROR;
+        return tipyfile_new_invalid();
+    }
+
+    // check header
+    if (memcmp(&data[0], FILE_HEADER, 1) != 0) {
+        if (pres)
+            *pres = TIPY_INVALID_FORMAT;
+        return tipyfile_new_invalid();
+    }
+
+    TiPyFile res = {0};
+
+    strncpy(res.file_info, &data[0xB], 42);
+    strncpy(res.var_name, &data[0x3C], 8);
+
+    u16 src_len = _tipyfile_get_word(&data[0x48]);
+    src_len -= 5; // skip past PYCD and \0 because it will always be present
+
+    char* file_name = NULL;
+    usize src_start = 0x4F;
+    // check if there's a long form filename
+    if (data[0x4E] != '\0') {
+        u8 file_name_len = data[0x4E];
+        // 0x4F is SOH, can ignore
+        file_name = calloc(1, file_name_len + 1);
+        check_alloc(file_name);
+        // should stop at nullterm in stream anyway
+        strncpy(file_name, &data[0x50], file_name_len);
+        src_start = 0x50 + file_name_len; // payload should start later
+        src_len -= 1 + file_name_len;
+
+        res.file_name = file_name;
+        res.file_name_len = file_name_len;
+    }
+
+    char* src = calloc(1, src_len + 1);
+    check_alloc(src);
+    strncpy(src, &data[src_start], src_len);
+
+    // we do not want to include the checksum in the stream already
+    u16 checksum = _tipyfile_get_checksum(data, len - 2);
+    u16 file_checksum = _tipyfile_get_word(&data[src_start + src_len]);
+    if (checksum != file_checksum) {
+        printf("wanted: %d, got: %d\n", file_checksum, checksum);
+        if (pres)
+            *pres = TIPY_CHECKSUM_INCORRECT;
+        free(src);
+        if (file_name)
+            free(file_name);
+        return tipyfile_new_invalid();
+    }
+
+    res.src = src;
+    res.src_len = src_len;
+
+    if (pres)
+        *pres = TIPY_PARSE_OK;
+
+    return res;
 }
 
 bool tipyfile_valid(const TiPyFile* f) {
