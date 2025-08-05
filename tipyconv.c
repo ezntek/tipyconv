@@ -36,22 +36,33 @@ void disasm_bin(const char* title, const char* data, usize len) {
 }
 
 void disasm_string(const char* title, const char* data, usize len) {
-    printf("\033[1m%s: \033[0m%.*s\n", title, (int)len, data);
+    printf("\033[1m%s: \033[0m\"%.*s\"\n", title, (int)len, data);
+}
+
+u16 disasm_num(const char* title, const char* data) {
+    u16 res = (u16)(data[0]) | (u16)(data[1] << 8);
+    printf("\033[1m%s: \033[0m%d\n", title, res);
+    return res;
 }
 
 void disasm(const a_string* file_contents) {
     // header
     const char* data = file_contents->data;
     disasm_bin("hdr", &data[0], 11);
-    disasm_bin("finfo", &data[0xB], 42);
-    disasm_bin("dsize", &data[0x35], 2);
+    disasm_string("finfo", &data[0xB], 42);
+    disasm_num("dsize", &data[0x35]);
     disasm_bin("fill", &data[0x37], 2);
-    disasm_bin("psize", &data[0x39], 2);
+    disasm_num("psize", &data[0x39]);
     disasm_bin("vid", &data[0x3B], 1);
-    disasm_bin("vname", &data[0x3C], 8);
-    disasm_bin("psize", &data[0x46], 2);
-    disasm_bin("plen", &data[0x48], 2);
-    disasm_bin("pyfmt", &data[0x4A], 5);
+    disasm_string("vname", &data[0x3C], 8);
+    disasm_num("psize", &data[0x46]);
+    u16 plen = disasm_num("plen", &data[0x48]);
+    disasm_string("pyfmt", &data[0x4A], 5);
+    plen -= 5;
+    disasm_string("payload", &data[0x4F], plen);
+    const size_t after_payload = 0x4F + plen;
+    disasm_bin("checksum", &data[after_payload],
+               file_contents->len - after_payload);
 }
 
 int main(int argc, char** argv) {
