@@ -12,10 +12,11 @@
 #ifndef _TIPYCONV_H
 #define _TIPYCONV_H
 
-#include "3rdparty/asv/a_string.h"
+#include "3rdparty/asv/a_vector.h"
 #include "common.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #define VAR_NAME_SZ  8
@@ -68,6 +69,8 @@ TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
  * in.
  *
  * Truncates var_name and file_info if necessary.
+ * Assumes string lengths are equal to strlen(the string) given that it were
+ * null-terminated.
  *
  * @param src source code
  * @param src_len source len
@@ -91,39 +94,42 @@ TiPyFile tipyfile_new_invalid(void);
  * @param buf_len buffer length
  * @return length of buffer, -1 on error
  */
-usize tipyfile_dump(TiPyFile* f, char* dest);
+usize tipyfile_dump(TiPyFile* f, char** dest);
 
 bool tipyfile_valid(const TiPyFile* f);
 void tipyfile_free(TiPyFile* f);
 
 #ifdef _TIPYCONV_IMPLEMENTATION
+
+#define BSWORD(w) ((u8[]){(u8)w, (u8)(w >> 8)})
+
+A_VECTOR_DECL(u8)
+
+A_VECTOR_IMPL(u8)
+
 static const char FILE_HEADER[] = {0x2a, 0x2a, 0x54, 0x49, 0x38, 0x33,
                                    0x46, 0x2a, 0x1a, 0x0a, 0x00};
 
 TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name) {
-    char* a_src = calloc(1, src_len);
-    check_alloc(a_src);
-    strncpy(a_src, src, src_len);
-
-    TiPyFile res = {
-        .src = a_src,
-        .src_len = src_len,
-    };
-
-    if (var_name) {
-        strncpy(res.var_name, var_name, VAR_NAME_SZ);
-    } else {
-        strncpy(res.var_name, "TIPYFILE", VAR_NAME_SZ);
-    }
-
-    return res;
+    return tipyfile_new_with_metadata_full(src, src_len, NULL, 0, NULL,
+                                           var_name);
 }
 
 TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
                                     const char* file_info,
                                     const char* var_name) {
-    return tipyfile_new_with_metadata_full(
-        src, strlen(src), file_name, strlen(file_name), file_info, var_name);
+    u16 src_len = 0;
+    u8 file_name_len = 0;
+
+    if (!src)
+        return tipyfile_new_invalid();
+    src_len = strlen(src);
+
+    if (file_name)
+        file_name_len = strlen(file_name);
+
+    return tipyfile_new_with_metadata_full(src, src_len, file_name,
+                                           file_name_len, file_info, var_name);
 }
 
 TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
@@ -131,12 +137,19 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
                                          u8 file_name_len,
                                          const char* file_info,
                                          const char* var_name) {
+    if (!src)
+        return tipyfile_new_invalid();
+
     char* a_src = calloc(1, src_len + 1);
-    char* a_fname = calloc(1, file_name_len + 1);
     check_alloc(a_src);
-    check_alloc(a_fname);
     strncpy(a_src, src, src_len);
-    strncpy(a_fname, file_name, file_name_len);
+
+    char* a_fname = NULL;
+    if (file_name) {
+        a_fname = calloc(1, file_name_len + 1);
+        check_alloc(a_fname);
+        strncpy(a_fname, file_name, file_name_len);
+    }
 
     TiPyFile res = {
         .src = a_src,
@@ -145,36 +158,101 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
         .file_name_len = file_name_len,
     };
 
-    if (var_name) {
+    if (var_name)
         strncpy(res.var_name, var_name, VAR_NAME_SZ);
-    } else {
-        strncpy(res.var_name, "TIPYFILE", VAR_NAME_SZ);
-    }
-    strncpy(res.file_info, file_info, FILE_INFO_SZ);
+    else
+        strncpy(res.var_name, "PYFILE", VAR_NAME_SZ);
+
+    if (file_info)
+        strncpy(res.file_info, file_info, FILE_INFO_SZ);
 
     return res;
 }
 
 TiPyFile tipyfile_new_invalid(void) { return (TiPyFile){0}; }
 
-usize tipyfile_dump(TiPyFile* f, char* dest) {
+static a_vector_u8 _tipyfile_dump_payload(TiPyFile* f) {
+    a_vector_u8 res =
+        a_vector_u8_with_capacity(f->src_len + f->file_name_len + 8);
+
+    a_vector_u8_append_slice(&res, (u8*)"PYCD", 4);
+    if (f->file_name) {
+        a_vector_u8_append_slice(&res, (u8[]){f->file_name_len, 0x01}, 2);
+        a_vector_u8_append_slice(&res, (u8*)f->file_name, f->file_name_len);
+    }
+    a_vector_u8_append(&res, 0x0);
+    a_vector_u8_append_slice(&res, (u8*)f->src, f->src_len);
+
+    return res;
+}
+
+// only call this when the whole file thus far has been populated!
+static u16 _tipyfile_get_checksum(a_vector_u8* res) {
+    u32 sum = 0;
+    for (usize i = 0x37; i < res->len; i++) {
+        sum += res->data[i];
+    }
+    if (sum > 1 << 16) {
+        sum = sum % 1 << 16;
+    }
+    return (u16)sum;
+}
+
+usize tipyfile_dump(TiPyFile* f, char** dest) {
     // we at least need that much
-    a_string res = a_string_with_capacity(81);
-    if (!a_string_valid(&res))
+    a_vector_u8 res = a_vector_u8_with_capacity(81);
+    if (!a_vector_u8_valid(&res))
         return -1;
 
     // header
-    a_string_append(&res, FILE_HEADER);
+    a_vector_u8_append_slice(&res, (u8*)FILE_HEADER, LENGTH(FILE_HEADER));
     // file info
-    a_string_append(&res, f->file_info);
+    a_vector_u8_append_slice(&res, (u8*)f->file_info, FILE_INFO_SZ);
 
     // 19 bytes (metadata) + sizeof("PYCD\0")
     u16 dsize = 24 + f->src_len;
-    dsize = (dsize << 8) | (dsize >> 8);
+    if (f->file_name) {
+        // length (bytes) + SOH
+        dsize += f->file_name_len + 2;
+    }
+
+    // hacky but whatever!
+    a_vector_u8_append_slice(&res, BSWORD(dsize), 2);
+    a_vector_u8_append_slice(&res, (u8[]){0x0d, 0x00}, 2);
+
+    a_vector_u8 payload = _tipyfile_dump_payload(f);
+    u16 psize = (u16)payload.len + 2;
+
+    // payload size
+    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
+
+    // var id
+    a_vector_u8_append(&res, 0x15);
+
+    // var name
+    a_vector_u8_append_slice(&res, (u8*)f->var_name, 8);
+
+    // padding
+    a_vector_u8_append_slice(&res, (u8*)&(u16){0}, 2);
+
+    // payload size
+    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
+    psize -= 2;
+    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
+    a_vector_u8_append_vector(&res, &payload);
+
+    // checksum
+    u16 checksum = _tipyfile_get_checksum(&res);
+    a_vector_u8_append_slice(&res, BSWORD(checksum), 2);
+
+    a_vector_u8_free(&payload);
+
+    *dest = (char*)res.data;
+    return res.len;
 }
 
 bool tipyfile_valid(const TiPyFile* f) {
-    return !memcmp(&f, &(TiPyFile){0}, sizeof(TiPyFile));
+    return !memcmp(f, &(TiPyFile){0}, sizeof(TiPyFile));
 }
 
 void tipyfile_free(TiPyFile* f) {

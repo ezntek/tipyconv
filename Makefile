@@ -2,10 +2,10 @@ CC ?= cc
 LD ?= ld
 INCLUDE = 
 
-SRC = tipyconv.c deserialize.c serialize.c
-OBJ = tipyconv.o deserialize.o serialize.o
+SRC = tipyconv.c
+OBJ = tipyconv.o 
 3RDPARTY_OBJ = 3rdparty/asv/a_string.o 
-HEADERS = common.h
+HEADERS = common.h tipyconv.h
 
 RELEASE_CFLAGS = -O2 -Wall -Wextra -pedantic $(INCLUDE) 
 DEBUG_CFLAGS = -O0 -g -Wall -Wextra -pedantic -fno-stack-protector -fsanitize=address $(INCLUDE)
@@ -20,7 +20,7 @@ else
 endif
 
 
-tipyconv: setup $(OBJ)
+tipyconv: setup $(OBJ) $(HEADERS)
 	$(CC) $(LIBS) $(CFLAGS) -o tipyconv $(OBJ) $(3RDPARTY_OBJ)
 
 setup: deps

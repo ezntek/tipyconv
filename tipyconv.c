@@ -16,6 +16,9 @@
 #include "3rdparty/include/a_string.h"
 #include "common.h"
 
+#define _TIPYCONV_IMPLEMENTATION
+#include "tipyconv.h"
+
 static const char HEADER_DATA[] = {0x2a, 0x2a, 0x54, 0x49, 0x38,
                                    0x33, 0x46, 0x2a, 0x1a, 0x0a};
 
@@ -41,9 +44,8 @@ u16 disasm_num(const char* title, const char* data) {
     return res;
 }
 
-void disasm(const a_string* file_contents) {
+void disasm(const char* data, usize len) {
     // header
-    const char* data = file_contents->data;
     disasm_bytes("hdr", &data[0], 11);
     disasm_string("finfo", &data[0xB], 42);
     disasm_num("dsize", &data[0x35]);
@@ -70,8 +72,7 @@ void disasm(const a_string* file_contents) {
 
     disasm_string("payload", &data[pstart], plen);
     const size_t after_payload = pstart + plen;
-    disasm_bytes("checksum", &data[after_payload],
-                 file_contents->len - after_payload);
+    disasm_bytes("checksum", &data[after_payload], len - after_payload);
 }
 
 a_string convert(const a_string* file_contents) {
@@ -95,6 +96,7 @@ int main(int argc, char** argv) {
     argv++;
 
     a_string filename = {0};
+
     if (argc == 0) {
         filename = a_string_input("enter file path: ");
         if (!a_string_valid(&filename)) {
@@ -102,6 +104,22 @@ int main(int argc, char** argv) {
         }
         a_string_inplace_trim(&filename);
     } else {
+        if (!strcmp(argv[0], "distest")) {
+            TiPyFile f = tipyfile_new_with_metadata_full(
+                "a", 1, NULL, 0, "Single file dated Fri Aug  1 22:52:41 20",
+                "ONE");
+            char* res = NULL;
+            usize len = tipyfile_dump(&f, &res);
+            tipyfile_free(&f);
+
+            disasm_bytes("whole file\n", res, len);
+            disasm(res, len);
+
+            free(res);
+
+            return 0;
+        }
+
         filename = astr(argv[0]);
     }
 
@@ -110,11 +128,11 @@ int main(int argc, char** argv) {
         panic("failed to read file contents");
     }
 
-    disasm(&file_contents);
+    disasm(file_contents.data, file_contents.len);
 
     // a_string_free(&res);
-    a_string_free(&filename);
     a_string_free(&file_contents);
 
+    a_string_free(&filename);
     return 0;
 }
