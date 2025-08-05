@@ -1,0 +1,18 @@
+=== FILE HEADER ===
+00 - 0A: header         (11 bytes)
+0B - 34: file info      (42 bytes)
+35 - 36: data size      (2 bytes) [L]
+37 - 38: 0x000D         (2 bytes) [L]
+39 - 3A: payload size   (2 bytes) [L]
+3B - 3B: variable id    (1 byte)  (0x15)
+3C - 43: variable name  (8 bytes)
+44 - 45: <padding>      (2 bytes)
+46 - 47: payload size   (2 bytes) [L]
+48 - 49: payload length (2 bytes) [L]
+4A - 4E: 'PYCD\0'       (5 bytes)
+4F -   : <payload>
+
+=== TRAILER ===
+2 bytes: checksum
+
+
