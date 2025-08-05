@@ -2,7 +2,8 @@ CC ?= cc
 LD ?= ld
 INCLUDE = 
 
-OBJ = tipyconv.o
+SRC = tipyconv.c deserialize.c serialize.c
+OBJ = tipyconv.o deserialize.o serialize.o
 3RDPARTY_OBJ = 3rdparty/asv/a_string.o 
 HEADERS = common.h
 

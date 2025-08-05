@@ -1,0 +1,4 @@
+If:
+ PathMatch: .*.h
+CompileFlags:
+ Add: [ -D_TIPYCONV_IMPLEMENTATION -xc-header ]
