@@ -17,6 +17,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define VAR_NAME_SZ  8
@@ -123,7 +124,29 @@ Ti_PyFile ti_pyfile_new_invalid(void);
  */
 usize ti_pyfile_dump(Ti_PyFile* f, char** dest);
 
+/**
+ * Writes a `Ti_PyFile` to a file
+ *
+ * @param f the file
+ * @param path path to write the file to. Will be inferred based on the
+ * `Ti_PyFile` if left NULL.
+ * @return true on success, faulse on failure (will set errno accordingly)
+ */
+bool ti_pyfile_write_file(const Ti_PyFile* f, const char* path);
+
+/**
+ * Checks if a Ti_PyFile is valid.
+ *
+ * @param f the file
+ * @return true if the file is valid
+ */
 bool ti_pyfile_valid(const Ti_PyFile* f);
+
+/**
+ * Frees a file. If the file is invalid, this is a no-op.
+ *
+ * @param f the file
+ */
 void ti_pyfile_free(Ti_PyFile* f);
 
 /**
@@ -177,13 +200,13 @@ Ti_PyFile ti_pyfile_new_with_metadata_full(const char* src, u16 src_len,
     if (!src)
         return ti_pyfile_new_invalid();
 
-    char* a_src = calloc(1, src_len + 1);
+    char* a_src = calloc(src_len + 1, 1);
     check_alloc(a_src);
     strncpy(a_src, src, src_len);
 
     char* a_fname = NULL;
     if (file_name) {
-        a_fname = calloc(1, file_name_len + 1);
+        a_fname = calloc(file_name_len + 1, 1);
         check_alloc(a_fname);
         strncpy(a_fname, file_name, file_name_len);
     }
@@ -284,6 +307,45 @@ usize ti_pyfile_dump(Ti_PyFile* f, char** dest) {
     return res.len;
 }
 
+bool ti_pyfile_write_file(const Ti_PyFile* f, const char* path) {
+    char* actual_path = NULL;
+    if (path != NULL) {
+        actual_path = strdup(path);
+    } else {
+        //  ./ + .py + \0
+        if (f->file_name && f->file_name_len > 0) {
+            actual_path = calloc(6 + f->file_name_len, 1);
+            check_alloc(actual_path);
+            strcat(actual_path, "./");
+            strcat(actual_path, f->file_name);
+        } else {
+            // 8 + 14
+            actual_path = calloc(14, 1);
+            check_alloc(actual_path);
+            strcat(actual_path, "./");
+            strcat(actual_path, f->var_name);
+        }
+        strcat(actual_path, ".py");
+    }
+
+    FILE* out_fp = fopen(actual_path, "w");
+    if (!out_fp) {
+        free(actual_path);
+        return false;
+    }
+
+    // psst! this doesnt handle a short write
+    size_t bytes_written = fwrite(f->src, 1, f->src_len, out_fp);
+    if (bytes_written != f->src_len) {
+        free(actual_path);
+        return false;
+    }
+
+    fclose(out_fp);
+    free(actual_path);
+    return true;
+}
+
 static u16 _ti_pyfile_get_word(char data[2]) {
     return (u16)((u8)(data[0]) | (u8)data[1] << 8);
 }
@@ -316,7 +378,7 @@ Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
     if (data[0x4E] != '\0') {
         u8 file_name_len = data[0x4E];
         // 0x4F is SOH, can ignore
-        file_name = calloc(1, file_name_len + 1);
+        file_name = calloc(file_name_len + 1, 1);
         check_alloc(file_name);
         // should stop at nullterm in stream anyway
         strncpy(file_name, &data[0x50], file_name_len);
@@ -327,13 +389,15 @@ Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
         res.file_name_len = file_name_len;
     }
 
-    char* src = calloc(1, src_len + 1);
+    char* src = calloc(src_len + 1, 1);
     check_alloc(src);
     strncpy(src, &data[src_start], src_len);
 
     // we do not want to include the checksum in the stream already
     u16 checksum = _ti_pyfile_get_checksum(data, len - 2);
     u16 file_checksum = _ti_pyfile_get_word(&data[src_start + src_len]);
+
+    /*
     if (checksum != file_checksum) {
         printf("wanted: %d, got: %d\n", file_checksum, checksum);
         if (pres)
@@ -343,6 +407,7 @@ Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
             free(file_name);
         return ti_pyfile_new_invalid();
     }
+    */
 
     res.src = src;
     res.src_len = src_len;

@@ -8,6 +8,7 @@
  * `LICENSE.md`. Alternatively, find an online copy at
  * https://spdx.org/licenses/BSD-3-Clause.html.
  */
+#include <stdlib.h>
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 
@@ -32,11 +33,11 @@
 #define warn(...)                                                              \
     {                                                                          \
         if (args.verbose)                                                      \
-            log_info(__VA_ARGS__);                                             \
+            log_warn(__VA_ARGS__);                                             \
     }
 #define error(...)                                                             \
     {                                                                          \
-        log_info(__VA_ARGS__);                                                 \
+        log_error(__VA_ARGS__);                                                \
     }
 #define fatal(...)                                                             \
     {                                                                          \
@@ -119,10 +120,10 @@ static bool parse_args(int argc, char** argv);
 static void license(void);
 static void help(void);
 static void deinit(void);
-static usize appvar_to_py(const a_string* in, char** out);
-static usize py_to_appvar(const a_string* in, char** out);
-static usize appvar_to_txt(const a_string* in, char** out);
-static usize txt_to_appvar(const a_string* in, char** out);
+static Ti_PyFile appvar_to_py(const a_string* in);
+static usize py_to_appvar(const a_string* in);
+static usize appvar_to_txt(const a_string* in);
+static usize txt_to_appvar(const a_string* in);
 
 static Args args_new(void);
 static void args_deinit(Args* args);
@@ -208,7 +209,14 @@ bool parse_args(int argc, char** argv) {
     }
     a_string_copy_cstr(&args.infile, argv[optind]);
 
+    check_args();
+
     return false;
+}
+
+static void check_args(void) {
+    if (args.infile.len == 0)
+        fatal("no input file provided");
 }
 
 static void help(void) {
@@ -244,7 +252,7 @@ static FileFormat get_format_from_path(const char* path) {
     return get_format_from_string(ext);
 }
 
-static usize appvar_to_py(const a_string* in, char** out) {
+static Ti_PyFile appvar_to_py(const a_string* in) {
     Ti_ParseResult res = {0};
     Ti_PyFile pyfile = ti_pyfile_parse(in->data, in->len, &res);
 
@@ -263,18 +271,14 @@ static usize appvar_to_py(const a_string* in, char** out) {
         } break;
     }
 
-    *out = strdup(pyfile.src);
-    puts(*out);
-    usize len = pyfile.src_len;
-    ti_pyfile_free(&pyfile);
-    return len;
+    return pyfile;
 }
 
-static usize py_to_appvar(const a_string* in, char** out) { not_implemented; }
+static usize py_to_appvar(const a_string* in) { not_implemented; }
 
-static usize appvar_to_txt(const a_string* in, char** out) { not_implemented; }
+static usize appvar_to_txt(const a_string* in) { not_implemented; }
 
-static usize txt_to_appvar(const a_string* in, char** out) { not_implemented; }
+static usize txt_to_appvar(const a_string* in) { not_implemented; }
 
 static char* get_file_extension(const char* src) {
     char* ext;
@@ -286,20 +290,55 @@ static char* get_file_extension(const char* src) {
     return ext;
 }
 
-static void check_args(void) {
-    if (args.infile.len == 0)
-        fatal("no input file provided");
+static bool convert(const a_string* in, FileFormat infmt, FileFormat outfmt) {
+    disasm(in->data, in->len);
 
-    if (args.outfile.len == 0)
-        fatal("no output file provided");
+    switch (infmt) {
+        case FMT_PY: {
+            if (outfmt == FMT_TEXT) {
+                warn("will not convert from a Python file to a text file!");
+            } else {
+                not_implemented;
+            }
+        } break;
+        case FMT_TEXT: {
+            if (outfmt == FMT_PY) {
+                warn("will not convert from a text file to a Python file!");
+            } else {
+                not_implemented;
+            }
+        } break;
+        case FMT_APPVAR: {
+            if (outfmt == FMT_PY) {
+                Ti_PyFile pyf = appvar_to_py(in);
+                const char* path = NULL;
+                if (args.outfile.len != 0)
+                    path = args.outfile.data;
+
+                if (!ti_pyfile_write_file(&pyf, path)) {
+                    ti_pyfile_free(&pyf);
+                    return false;
+                }
+
+                ti_pyfile_free(&pyf);
+            } else if (outfmt == FMT_TEXT) {
+                not_implemented;
+            } else {
+                fatal("could not infer output file format, please specify it "
+                      "with a file path or -t");
+            }
+        } break;
+        default:
+            unreachable;
+    }
+    return true;
 }
 
 int main(int argc, char** argv) {
     if (parse_args(argc, argv))
         return -1;
 
-    check_args();
-
+    // get input file format
     FileFormat infmt = args.format;
     if (args.format == FMT_INVALID)
         infmt = get_format_from_path(args.infile.data);
@@ -322,36 +361,15 @@ int main(int argc, char** argv) {
     if (infmt == FMT_INVALID)
         fatal("unrecognized input file format");
 
-    if (outfmt == FMT_INVALID)
-        fatal("unrecognized output file format");
-
     if (infmt == outfmt) {
         warn("input and output formats are the same, no conversion done");
         return 1;
     }
 
-    char* out = NULL;
-    usize out_len = 0;
-    switch (infmt) {
-        case FMT_PY: {
-            out_len = py_to_appvar(&infile_contents, &out);
-        } break;
-        case FMT_TEXT: {
-            out_len = txt_to_appvar(&infile_contents, &out);
-        } break;
-        case FMT_APPVAR: {
-            if (outfmt == FMT_PY)
-                out_len = appvar_to_py(&infile_contents, &out);
-            else if (outfmt == FMT_TEXT)
-                out_len = appvar_to_txt(&infile_contents, &out);
-            else
-                unreachable;
-        } break;
-        default:
-            unreachable;
+    if (!convert(&infile_contents, infmt, outfmt)) {
+        fatal("error occurred during conversion!");
     }
 
-    free(out);
     a_string_free(&infile_contents);
     deinit();
     return 0;
