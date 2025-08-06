@@ -11,7 +11,11 @@
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 
+#include <errno.h>
+#include <getopt.h>
 #include <stdio.h>
+#include <string.h>
+#include <strings.h>
 
 #include "3rdparty/asv/a_string.h"
 #include "3rdparty/include/a_string.h"
@@ -20,8 +24,24 @@
 #define _TIPYCONV_IMPLEMENTATION
 #include "tipyconv.h"
 
-static const char HEADER_DATA[] = {0x2a, 0x2a, 0x54, 0x49, 0x38,
-                                   0x33, 0x46, 0x2a, 0x1a, 0x0a};
+#define info(...)                                                              \
+    {                                                                          \
+        if (args.verbose)                                                      \
+            log_info(__VA_ARGS__);                                             \
+    }
+#define warn(...)                                                              \
+    {                                                                          \
+        if (args.verbose)                                                      \
+            log_info(__VA_ARGS__);                                             \
+    }
+#define error(...)                                                             \
+    {                                                                          \
+        log_info(__VA_ARGS__);                                                 \
+    }
+#define fatal(...)                                                             \
+    {                                                                          \
+        log_fatal(__VA_ARGS__);                                                \
+    }
 
 void disasm_bytes(const char* title, const char* data, usize len) {
     printf("\033[1m%s: \033[0m", title);
@@ -76,84 +96,238 @@ void disasm(const char* data, usize len) {
     disasm_bytes("checksum", &data[after_payload], len - after_payload);
 }
 
-a_string convert(const a_string* file_contents) {
-    // push header
-    a_string res = astr(HEADER_DATA);
+typedef enum {
+    FMT_APPVAR = 0,
+    FMT_PY = 1,
+    FMT_TEXT = 2,
+    FMT_INVALID = 3,
+} FileFormat;
 
-    // push padding bytes
-    // 21 words = 42 bytes
-    char empty[42] = {0};
-    a_string_append_cstr(&res, empty);
+typedef struct {
+    a_string infile;
+    a_string outfile;
+    a_string varname;
+    a_string filename;
+    FileFormat format;
+    FileFormat target_format;
+    bool verbose;
+    bool help;
+    bool license;
+} Args;
 
-    //
+static bool parse_args(int argc, char** argv);
+static void license(void);
+static void help(void);
+static void deinit(void);
+static usize appvar_to_py(const a_string* in, char** out);
+static usize py_to_appvar(const a_string* in, char** out);
+static usize appvar_to_txt(const a_string* in, char** out);
+static usize txt_to_appvar(const a_string* in, char** out);
 
-    a_string_append_astr(&res, file_contents);
+static Args args_new(void);
+static void args_deinit(Args* args);
 
-    return res;
+static char* get_file_extension(const char* src);
+static FileFormat get_format_from_string(const char* ext);
+
+static Args args;
+static const struct option LONG_OPTS[] = {
+    {"outfile", optional_argument, 0, 'o'},
+    {"format", optional_argument, 0, 'f'},
+    {"target-format", optional_argument, 0, 't'},
+    {"varname", optional_argument, 0, 'N'},
+    {"filename", optional_argument, 0, 'F'},
+    {"verbose", no_argument, 0, 'v'},
+    {"help", no_argument, 0, 'h'},
+    {"license", no_argument, 0, 'l'},
+    {0},
+};
+
+static Args args_new(void) {
+    return (Args){
+        .infile = a_string_with_capacity(25),
+        .outfile = a_string_with_capacity(25),
+        .varname = a_string_with_capacity(25),
+        .filename = a_string_with_capacity(25),
+    };
 }
 
-int main(int argc, char** argv) {
-    argc--;
-    argv++;
+static void args_deinit(Args* args) {
+    a_string_free(&args->infile);
+    a_string_free(&args->outfile);
+    a_string_free(&args->varname);
+    a_string_free(&args->filename);
+}
 
-    a_string filename = {0};
+bool parse_args(int argc, char** argv) {
+    args = args_new();
 
-    if (argc == 0) {
-        filename = a_string_input("enter file path: ");
-        if (!a_string_valid(&filename)) {
-            panic("failed to read user input");
+    char c;
+    while ((c = getopt_long(argc, argv, "o:f:N:F:t:v:h:l", LONG_OPTS, NULL)) !=
+           -1) {
+        switch (c) {
+            case 'o': {
+                a_string_copy_cstr(&args.infile, optarg);
+            } break;
+            case 'f': {
+                args.format = get_format_from_string(optarg);
+            } break;
+            case 'N': {
+                a_string_copy_cstr(&args.varname, optarg);
+            } break;
+            case 'F': {
+                a_string_copy_cstr(&args.filename, optarg);
+            } break;
+            case 't': {
+                args.target_format = get_format_from_string(optarg);
+            } break;
+            case 'v': {
+                args.verbose = true;
+            } break;
+            case 'h': {
+                help();
+            } break;
+            case 'l': {
+                license();
+            } break;
+            case '?': {
+                help();
+                return true;
+            } break;
         }
-        a_string_inplace_trim(&filename);
-    } else {
-        if (!strcmp(argv[0], "distest")) {
-            TiPyFile f = tipyfile_new_with_metadata_full(
-                "a", 1, NULL, 0, "Single file dated Fri Aug  1 22:52:41 20",
-                "ONE");
-            char* res = NULL;
-            usize len = tipyfile_dump(&f, &res);
-            tipyfile_free(&f);
-
-            disasm(res, len);
-
-            free(res);
-
-            return 0;
-        }
-
-        filename = astr(argv[0]);
     }
 
-    a_string file_contents = a_string_read_file(filename.data);
-    if (!a_string_valid(&file_contents)) {
-        panic("failed to read file contents");
+    // positional arg: input file
+    if (optind >= argc) {
+        error("must supply input file as positional argument!");
+        help();
+        return true;
     }
+    a_string_copy_cstr(&args.outfile, argv[optind]);
 
-    info("loaded file \"%.*s\".", (int)filename.len, filename.data);
+    return false;
+}
 
-    TiPyParseResult res = {0};
-    TiPyFile pyfile =
-        tipyfile_parse(file_contents.data, file_contents.len, &res);
+static void help(void) { puts(HELP); }
+
+static void license(void) { puts(LICENSE); }
+
+static void deinit(void) { args_deinit(&args); }
+
+static FileFormat get_format_from_string(const char* ext) {
+    if (ext == NULL)
+        return FMT_INVALID;
+
+    if (!strcasecmp(ext, "py"))
+        return FMT_PY;
+    else if (!strcasecmp(ext, "8xv"))
+        return FMT_APPVAR;
+    else if (!strcasecmp(ext, "appvar"))
+        return FMT_APPVAR;
+    else if (!strcasecmp(ext, "txt"))
+        return FMT_TEXT;
+
+    return FMT_INVALID;
+}
+
+static usize appvar_to_py(const a_string* in, char** out) {
+    Ti_ParseResult res = {0};
+    Ti_PyFile pyfile = ti_pyfile_parse(in->data, in->len, &res);
 
     switch (res) {
-        case TIPY_PARSE_OK: {
+        case TI_PARSE_OK: {
             info("successfully parsed");
         } break;
-        case TIPY_PARSE_ERROR: {
+        case TI_PARSE_ERROR: {
             fatal("failed to parse");
         } break;
-        case TIPY_INVALID_FORMAT: {
+        case TI_INVALID_FORMAT: {
             fatal("invalid file format");
         } break;
-        case TIPY_CHECKSUM_INCORRECT: {
+        case TI_CHECKSUM_INCORRECT: {
             fatal("incorrect checksum");
         } break;
     }
 
-    eprintf("\033[1m===== beginning of extracted source =====\n\033[0m");
-    printf("%s\n", pyfile.src);
+    *out = strdup(pyfile.src);
+    return pyfile.src_len;
+}
 
-    tipyfile_free(&pyfile);
-    a_string_free(&file_contents);
-    a_string_free(&filename);
+static usize py_to_appvar(const a_string* in, char** out) { not_implemented; }
+
+static usize appvar_to_txt(const a_string* in, char** out) { not_implemented; }
+
+static usize txt_to_appvar(const a_string* in, char** out) { not_implemented; }
+
+static char* get_file_extension(const char* src) {
+    char* ext;
+    const char* dot = strrchr(src, '.');
+    if (!dot || dot == args.filename.data)
+        ext = NULL;
+    else
+        ext = (char*)dot + 1;
+    return ext;
+}
+
+int main(int argc, char** argv) {
+    if (parse_args(argc, argv))
+        return -1;
+
+    // get the file extension first
+    const char* infile_ext = get_file_extension(args.infile.data);
+    FileFormat infmt = args.format;
+    if (args.format == FMT_INVALID)
+        infmt = get_format_from_string(infile_ext);
+
+    a_string infile_contents = a_string_read_file(args.infile.data);
+    if (!a_string_valid(&infile_contents)) {
+        deinit();
+        fatal("failed to read input file: %s", strerror(errno));
+    }
+
+    if (infmt == FMT_INVALID)
+        if (ti_is_appvar(infile_contents.data))
+            infmt = FMT_APPVAR;
+
+    // get the output file format
+    FileFormat outfmt = args.target_format;
+    if (args.target_format == FMT_INVALID) {
+        const char* outfile_ext = get_file_extension(args.outfile.data);
+        outfmt = get_format_from_string(outfile_ext);
+    }
+
+    if (infmt == FMT_INVALID)
+        fatal("unrecognized input file format");
+
+    if (outfmt == FMT_INVALID)
+        fatal("unrecognized output file format");
+
+    if (infmt == outfmt) {
+        warn("input and output formats are the same, no conversion done");
+        return 1;
+    }
+
+    char* out = NULL;
+    usize out_len = 0;
+    switch (infmt) {
+        case FMT_PY: {
+            out_len = py_to_appvar(&infile_contents, &out);
+        } break;
+        case FMT_TEXT: {
+            out_len = txt_to_appvar(&infile_contents, &out);
+        } break;
+        case FMT_APPVAR: {
+            if (outfmt == FMT_PY)
+                out_len = appvar_to_py(&infile_contents, &out);
+            else if (outfmt == FMT_TEXT)
+                out_len = appvar_to_txt(&infile_contents, &out);
+            else
+                unreacheable;
+        } break;
+        default:
+            unreacheable;
+    }
+
+    deinit();
     return 0;
 }

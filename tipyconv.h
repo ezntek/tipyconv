@@ -35,14 +35,14 @@ typedef struct {
     char file_info[42];
     // var name (null-termination not guaranteed!)
     char var_name[8];
-} TiPyFile;
+} Ti_PyFile;
 
 typedef enum {
-    TIPY_PARSE_OK = 0,
-    TIPY_PARSE_ERROR = 1,
-    TIPY_INVALID_FORMAT = 2,
-    TIPY_CHECKSUM_INCORRECT = 3,
-} TiPyParseResult;
+    TI_PARSE_OK = 0,
+    TI_PARSE_ERROR = 1,
+    TI_INVALID_FORMAT = 2,
+    TI_CHECKSUM_INCORRECT = 3,
+} Ti_ParseResult;
 
 /**
  * Creates a new TiPyFile with minimal metadata.
@@ -55,7 +55,7 @@ typedef enum {
  * @param var_name variable name in calculator
  * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
-TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name);
+Ti_PyFile ti_pyfile_new(const char* src, usize src_len, const char* var_name);
 
 /**
  * Creates a new TiPyFile with all metadata. Strings have to be null_terminated,
@@ -69,9 +69,9 @@ TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name);
  * @param var_name variable name in calculator
  * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
-TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
-                                    const char* file_info,
-                                    const char* var_name);
+Ti_PyFile ti_pyfile_new_with_metadata(const char* src, const char* file_name,
+                                      const char* file_info,
+                                      const char* var_name);
 
 /**
  * Creates a new TiPyFile with all metadata. Allows string lengths to be passed
@@ -89,11 +89,11 @@ TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
  * @param var_name variable name in calculator
  * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
-TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
-                                         const char* file_name,
-                                         u8 file_name_len,
-                                         const char* file_info,
-                                         const char* var_name);
+Ti_PyFile ti_pyfile_new_with_metadata_full(const char* src, u16 src_len,
+                                           const char* file_name,
+                                           u8 file_name_len,
+                                           const char* file_info,
+                                           const char* var_name);
 
 /**
  * Parses a binary file and returns a TiPyFile.
@@ -107,12 +107,12 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
  * @param pres result of the parser, if any. Can be left null
  * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
-TiPyFile tipyfile_parse(char* data, usize len, TiPyParseResult* pres);
+Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres);
 
 /**
  * Creates an invalid TiPyFile. Used to report errors.
  */
-TiPyFile tipyfile_new_invalid(void);
+Ti_PyFile ti_pyfile_new_invalid(void);
 
 /**
  * Dumps the `TiPyFile` into a malloc'ed buffer.
@@ -121,10 +121,20 @@ TiPyFile tipyfile_new_invalid(void);
  * @param buf_len buffer length
  * @return length of buffer, -1 on error
  */
-usize tipyfile_dump(TiPyFile* f, char** dest);
+usize ti_pyfile_dump(Ti_PyFile* f, char** dest);
 
-bool tipyfile_valid(const TiPyFile* f);
-void tipyfile_free(TiPyFile* f);
+bool ti_pyfile_valid(const Ti_PyFile* f);
+void ti_pyfile_free(Ti_PyFile* f);
+
+/**
+ * Checks if a buffer is a TI AppVar.
+ *
+ * Assumes that data is longer than 11 bytes.
+ *
+ * @param data buffer
+ * @return true if the buffer's header is that of an AppVar.
+ */
+bool ti_is_appvar(const char* data);
 
 #ifdef _TIPYCONV_IMPLEMENTATION
 
@@ -137,35 +147,35 @@ A_VECTOR_IMPL(u8)
 static const char FILE_HEADER[] = {0x2a, 0x2a, 0x54, 0x49, 0x38, 0x33,
                                    0x46, 0x2a, 0x1a, 0x0a, 0x00};
 
-TiPyFile tipyfile_new(const char* src, usize src_len, const char* var_name) {
-    return tipyfile_new_with_metadata_full(src, src_len, NULL, 0, NULL,
-                                           var_name);
+Ti_PyFile ti_pyfile_new(const char* src, usize src_len, const char* var_name) {
+    return ti_pyfile_new_with_metadata_full(src, src_len, NULL, 0, NULL,
+                                            var_name);
 }
 
-TiPyFile tipyfile_new_with_metadata(const char* src, const char* file_name,
-                                    const char* file_info,
-                                    const char* var_name) {
+Ti_PyFile ti_pyfile_new_with_metadata(const char* src, const char* file_name,
+                                      const char* file_info,
+                                      const char* var_name) {
     u16 src_len = 0;
     u8 file_name_len = 0;
 
     if (!src)
-        return tipyfile_new_invalid();
+        return ti_pyfile_new_invalid();
     src_len = strlen(src);
 
     if (file_name)
         file_name_len = strlen(file_name);
 
-    return tipyfile_new_with_metadata_full(src, src_len, file_name,
-                                           file_name_len, file_info, var_name);
+    return ti_pyfile_new_with_metadata_full(src, src_len, file_name,
+                                            file_name_len, file_info, var_name);
 }
 
-TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
-                                         const char* file_name,
-                                         u8 file_name_len,
-                                         const char* file_info,
-                                         const char* var_name) {
+Ti_PyFile ti_pyfile_new_with_metadata_full(const char* src, u16 src_len,
+                                           const char* file_name,
+                                           u8 file_name_len,
+                                           const char* file_info,
+                                           const char* var_name) {
     if (!src)
-        return tipyfile_new_invalid();
+        return ti_pyfile_new_invalid();
 
     char* a_src = calloc(1, src_len + 1);
     check_alloc(a_src);
@@ -178,7 +188,7 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
         strncpy(a_fname, file_name, file_name_len);
     }
 
-    TiPyFile res = {
+    Ti_PyFile res = {
         .src = a_src,
         .src_len = src_len,
         .file_name = a_fname,
@@ -196,9 +206,9 @@ TiPyFile tipyfile_new_with_metadata_full(const char* src, u16 src_len,
     return res;
 }
 
-TiPyFile tipyfile_new_invalid(void) { return (TiPyFile){0}; }
+Ti_PyFile ti_pyfile_new_invalid(void) { return (Ti_PyFile){0}; }
 
-static a_vector_u8 _tipyfile_dump_payload(TiPyFile* f) {
+static a_vector_u8 _ti_pyfile_dump_payload(Ti_PyFile* f) {
     a_vector_u8 res =
         a_vector_u8_with_capacity(f->src_len + f->file_name_len + 8);
 
@@ -213,7 +223,7 @@ static a_vector_u8 _tipyfile_dump_payload(TiPyFile* f) {
     return res;
 }
 
-static u16 _tipyfile_get_checksum(const char* data, usize len) {
+static u16 _ti_pyfile_get_checksum(const char* data, usize len) {
     u32 sum = 0;
     for (usize i = 0x37; i < len; i++) {
         sum += data[i];
@@ -221,7 +231,7 @@ static u16 _tipyfile_get_checksum(const char* data, usize len) {
     return (u16)(sum & 0xffff);
 }
 
-usize tipyfile_dump(TiPyFile* f, char** dest) {
+usize ti_pyfile_dump(Ti_PyFile* f, char** dest) {
     // we at least need that much
     a_vector_u8 res = a_vector_u8_with_capacity(81);
     if (!a_vector_u8_valid(&res))
@@ -243,7 +253,7 @@ usize tipyfile_dump(TiPyFile* f, char** dest) {
     a_vector_u8_append_slice(&res, BSWORD(dsize), 2);
     a_vector_u8_append_slice(&res, (u8[]){0x0d, 0x00}, 2);
 
-    a_vector_u8 payload = _tipyfile_dump_payload(f);
+    a_vector_u8 payload = _ti_pyfile_dump_payload(f);
     u16 psize = (u16)payload.len + 2;
 
     // payload size
@@ -265,7 +275,7 @@ usize tipyfile_dump(TiPyFile* f, char** dest) {
     a_vector_u8_append_vector(&res, &payload);
 
     // checksum
-    u16 checksum = _tipyfile_get_checksum((char*)res.data, res.len);
+    u16 checksum = _ti_pyfile_get_checksum((char*)res.data, res.len);
     a_vector_u8_append_slice(&res, BSWORD(checksum), 2);
 
     a_vector_u8_free(&payload);
@@ -274,30 +284,30 @@ usize tipyfile_dump(TiPyFile* f, char** dest) {
     return res.len;
 }
 
-static u16 _tipyfile_get_word(char data[2]) {
+static u16 _ti_pyfile_get_word(char data[2]) {
     return (u16)((u8)(data[0]) | (u8)data[1] << 8);
 }
 
-TiPyFile tipyfile_parse(char* data, usize len, TiPyParseResult* pres) {
+Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
     if (!data) {
         if (pres)
-            *pres = TIPY_PARSE_ERROR;
-        return tipyfile_new_invalid();
+            *pres = TI_PARSE_ERROR;
+        return ti_pyfile_new_invalid();
     }
 
     // check header
     if (memcmp(&data[0], FILE_HEADER, 1) != 0) {
         if (pres)
-            *pres = TIPY_INVALID_FORMAT;
-        return tipyfile_new_invalid();
+            *pres = TI_INVALID_FORMAT;
+        return ti_pyfile_new_invalid();
     }
 
-    TiPyFile res = {0};
+    Ti_PyFile res = {0};
 
     strncpy(res.file_info, &data[0xB], 42);
     strncpy(res.var_name, &data[0x3C], 8);
 
-    u16 src_len = _tipyfile_get_word(&data[0x48]);
+    u16 src_len = _ti_pyfile_get_word(&data[0x48]);
     src_len -= 5; // skip past PYCD and \0 because it will always be present
 
     char* file_name = NULL;
@@ -322,36 +332,40 @@ TiPyFile tipyfile_parse(char* data, usize len, TiPyParseResult* pres) {
     strncpy(src, &data[src_start], src_len);
 
     // we do not want to include the checksum in the stream already
-    u16 checksum = _tipyfile_get_checksum(data, len - 2);
-    u16 file_checksum = _tipyfile_get_word(&data[src_start + src_len]);
+    u16 checksum = _ti_pyfile_get_checksum(data, len - 2);
+    u16 file_checksum = _ti_pyfile_get_word(&data[src_start + src_len]);
     if (checksum != file_checksum) {
         printf("wanted: %d, got: %d\n", file_checksum, checksum);
         if (pres)
-            *pres = TIPY_CHECKSUM_INCORRECT;
+            *pres = TI_CHECKSUM_INCORRECT;
         free(src);
         if (file_name)
             free(file_name);
-        return tipyfile_new_invalid();
+        return ti_pyfile_new_invalid();
     }
 
     res.src = src;
     res.src_len = src_len;
 
     if (pres)
-        *pres = TIPY_PARSE_OK;
+        *pres = TI_PARSE_OK;
 
     return res;
 }
 
-bool tipyfile_valid(const TiPyFile* f) {
-    return !memcmp(f, &(TiPyFile){0}, sizeof(TiPyFile));
+bool ti_pyfile_valid(const Ti_PyFile* f) {
+    return !memcmp(f, &(Ti_PyFile){0}, sizeof(Ti_PyFile));
 }
 
-void tipyfile_free(TiPyFile* f) {
+void ti_pyfile_free(Ti_PyFile* f) {
     if (f->file_name)
         free((void*)f->file_name);
     if (f->src)
         free((void*)f->src);
+}
+
+bool ti_is_appvar(const char* data) {
+    return (memcmp(data, FILE_HEADER, 1) != 0);
 }
 
 #endif // _TIPYCONV_IMPLEMENTATION

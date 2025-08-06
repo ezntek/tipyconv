@@ -1,10 +1,9 @@
 /*
- * beanbricks.c: a questionable breakout clone in C and Raylib.
+ * Common utility definitions for all C projects.
  *
  * Copyright (c) Eason Qin <eason@ezntek.com>, 2024-2025.
  *
- * This source code form is wholly licensed under the MIT/Expat license. View
- * the full license text in the root of the project.
+ * This source code form is licensed under the BSD 0-Clause license.
  *
  * INFO: common declarations
  */
@@ -12,8 +11,8 @@
 #ifndef _COMMON_H
 #define _COMMON_H
 
-#include <stdio.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <sys/types.h>
 
 typedef size_t usize;
@@ -85,21 +84,21 @@ typedef double f64;
         exit(1);                                                               \
     }
 
-#define fatal_noexit(...)                                                      \
+#define log_error(...)                                                         \
     {                                                                          \
-        eprintf(S_RED S_BOLD "[fatal] " S_END);                                \
+        eprintf(S_RED S_BOLD "[error] " S_END);                                \
         eprintf(S_DIM);                                                        \
         eprintf(__VA_ARGS__);                                                  \
         eprintf(S_END "\n");                                                   \
     }
 
-#define fatal(...)                                                             \
+#define log_fatal(...)                                                         \
     {                                                                          \
-        fatal_noexit(__VA_ARGS__);                                             \
+        log_error(__VA_ARGS__);                                                \
         exit(1);                                                               \
     }
 
-#define warn(...)                                                              \
+#define log_warn(...)                                                          \
     {                                                                          \
         eprintf(S_MAGENTA S_BOLD "[warn] " S_END);                             \
         eprintf(S_DIM);                                                        \
@@ -107,7 +106,7 @@ typedef double f64;
         eprintf(S_END "\n");                                                   \
     }
 
-#define info(...)                                                              \
+#define log_info(...)                                                          \
     {                                                                          \
         eprintf(S_CYAN S_BOLD "[info] " S_END);                                \
         eprintf(S_DIM);                                                        \
@@ -115,43 +114,72 @@ typedef double f64;
         eprintf(S_END "\n");                                                   \
     }
 
-#define VERSION "0.2.0-pre"
+#define not_implemented log_fatal("feature not implemented")
+#define unreacheable    panic("reached unreacheable code")
+
+#define VERSION "0.1.0"
 
 #define HELP                                                                   \
-    "\033[1mbeanbricks: a questionable breakout clone in C and "               \
-    "raylib.\033[0m\n\n"                                                       \
-    "Copyright (c) Eason Qin <eason@ezntek.com>, 2024-2025.\n"                 \
-    "This program is licensed under the MIT/Expat license. View the full "     \
-    "text of the\nlicense in the root of the project, or pass --license.\n\n"  \
-    "usage: beanbricks [flags]\n"                                              \
-    "running the program with no args will launch the game.\n\n"               \
-    "options:\n"                                                               \
-    "    --help: show this help screen\n"                                      \
-    "    --version: show the version of the program\n"                         \
-    "    --license: show the license of the program\n"
+    "usage: tipyconv [OPTIONS] <filename>\n"                                   \
+    "Options:\n"                                                               \
+    "  -o, --outfile:       Output path of conversion\n"                       \
+    "  -f, --format:        Format of input file\n"                            \
+    "  -t, --target-format: Format of output file\n   "                        \
+    "  -N, --varname:       Name of file in calculator (only used for text "   \
+    "-> 8xv)\n"                                                                \
+    "  -F, --filename:      Long file name in calculator (only used for text " \
+    "-> 8xv)\n"                                                                \
+    "  -V, --version:       Show the version\n"                                \
+    "  -v, --verbose:       Show verbose output\n"                             \
+    "  -h, --help:          Show this help screen\n"                           \
+    "  -l, --license:       Show the license\n"                                \
+    "The source file format will be determined by the argument passed to "     \
+    "--format,\n"                                                              \
+    "the file extension of <filename> in that order.\n\n"                      \
+    "version " VERSION "\n"
 
 #define LICENSE                                                                \
-    "Copyright (c) 2024-2025 Eason Qin (eason@ezntek.com)\n"                   \
+    "BSD 3-Clause License\n"                                                   \
     "\n"                                                                       \
-    "Permission is hereby granted, free of charge, to any person\n"            \
-    "obtaining a copy of this software and associated documentation\n"         \
-    "files (the “Software”), to deal in the Software without\n"                \
-    "restriction, including without limitation the rights to use,\n"           \
-    "copy, modify, merge, publish, distribute, sublicense, and/or sell\n"      \
-    "copies of the Software, and to permit persons to whom the\n"              \
-    "Software is furnished to do so, subject to the following\n"               \
-    "conditions:\n"                                                            \
+    "Copyright (c) 2025, Eason Qin <eason@ezntek.com>\n"                       \
+    "All rights reserved.\n"                                                   \
     "\n"                                                                       \
-    "The above copyright notice and this permission notice shall be\n"         \
-    "included in all copies or substantial portions of the Software.\n"        \
+    "Redistribution and use in source and binary forms, with or without\n"     \
+    "modification, are permitted provided that the following conditions are "  \
+    "met:\n"                                                                   \
     "\n"                                                                       \
-    "THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n"        \
-    "EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n"        \
-    "OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n"               \
-    "NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n"            \
-    "HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n"           \
-    "WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n"           \
-    "FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n"          \
-    "OTHER DEALINGS IN THE SOFTWARE.\n"
+    "1. Redistributions of source code must retain the above copyright "       \
+    "notice,\n"                                                                \
+    "   this list of conditions and the following disclaimer.\n"               \
+    "\n"                                                                       \
+    "2. Redistributions in binary form must reproduce the above copyright\n"   \
+    "   notice, this list of conditions and the following disclaimer in the\n" \
+    "   documentation and/or other materials provided with the "               \
+    "distribution.\n"                                                          \
+    "\n"                                                                       \
+    "3. Neither the name of the copyright holder nor the names of its\n"       \
+    "   contributors may be used to endorse or promote products derived "      \
+    "from\n"                                                                   \
+    "   this software without specific prior written permission.\n"            \
+    "\n"                                                                       \
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "     \
+    "\"AS IS\"\n"                                                              \
+    "AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, "   \
+    "THE\n"                                                                    \
+    "IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR "      \
+    "PURPOSE\n"                                                                \
+    "ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS "  \
+    "BE\n"                                                                     \
+    "LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR\n"    \
+    "CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF\n"   \
+    "SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR "         \
+    "BUSINESS\n"                                                               \
+    "INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER "    \
+    "IN\n"                                                                     \
+    "CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR "            \
+    "OTHERWISE)\n"                                                             \
+    "ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF "  \
+    "THE\n"                                                                    \
+    "POSSIBILITY OF SUCH DAMAGE."
 
 #endif
