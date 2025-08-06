@@ -87,9 +87,8 @@ typedef double f64;
 #define log_error(...)                                                         \
     {                                                                          \
         eprintf(S_RED S_BOLD "[error] " S_END);                                \
-        eprintf(S_DIM);                                                        \
         eprintf(__VA_ARGS__);                                                  \
-        eprintf(S_END "\n");                                                   \
+        eprintf("\n");                                                         \
     }
 
 #define log_fatal(...)                                                         \
@@ -101,21 +100,19 @@ typedef double f64;
 #define log_warn(...)                                                          \
     {                                                                          \
         eprintf(S_MAGENTA S_BOLD "[warn] " S_END);                             \
-        eprintf(S_DIM);                                                        \
         eprintf(__VA_ARGS__);                                                  \
-        eprintf(S_END "\n");                                                   \
+        eprintf("\n");                                                         \
     }
 
 #define log_info(...)                                                          \
     {                                                                          \
         eprintf(S_CYAN S_BOLD "[info] " S_END);                                \
-        eprintf(S_DIM);                                                        \
         eprintf(__VA_ARGS__);                                                  \
-        eprintf(S_END "\n");                                                   \
+        eprintf("\n");                                                         \
     }
 
 #define not_implemented log_fatal("feature not implemented")
-#define unreacheable    panic("reached unreacheable code")
+#define unreachable     panic("reached unreachable code")
 
 #define VERSION "0.1.0"
 
@@ -124,7 +121,7 @@ typedef double f64;
     "Options:\n"                                                               \
     "  -o, --outfile:       Output path of conversion\n"                       \
     "  -f, --format:        Format of input file\n"                            \
-    "  -t, --target-format: Format of output file\n   "                        \
+    "  -t, --target-format: Format of output file\n"                           \
     "  -N, --varname:       Name of file in calculator (only used for text "   \
     "-> 8xv)\n"                                                                \
     "  -F, --filename:      Long file name in calculator (only used for text " \

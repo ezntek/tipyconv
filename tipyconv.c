@@ -97,10 +97,10 @@ void disasm(const char* data, usize len) {
 }
 
 typedef enum {
-    FMT_APPVAR = 0,
-    FMT_PY = 1,
-    FMT_TEXT = 2,
-    FMT_INVALID = 3,
+    FMT_INVALID = 0,
+    FMT_APPVAR = 1,
+    FMT_PY = 2,
+    FMT_TEXT = 3,
 } FileFormat;
 
 typedef struct {
@@ -129,19 +129,22 @@ static void args_deinit(Args* args);
 
 static char* get_file_extension(const char* src);
 static FileFormat get_format_from_string(const char* ext);
+static void check_args(void);
 
-static Args args;
 static const struct option LONG_OPTS[] = {
-    {"outfile", optional_argument, 0, 'o'},
-    {"format", optional_argument, 0, 'f'},
-    {"target-format", optional_argument, 0, 't'},
-    {"varname", optional_argument, 0, 'N'},
-    {"filename", optional_argument, 0, 'F'},
+    {"outfile", required_argument, 0, 'o'},
+    {"format", required_argument, 0, 'f'},
+    {"target-format", required_argument, 0, 't'},
+    {"varname", required_argument, 0, 'N'},
+    {"filename", required_argument, 0, 'F'},
     {"verbose", no_argument, 0, 'v'},
     {"help", no_argument, 0, 'h'},
     {"license", no_argument, 0, 'l'},
     {0},
 };
+static Args args;
+
+// === function decls ===
 
 static Args args_new(void) {
     return (Args){
@@ -162,12 +165,12 @@ static void args_deinit(Args* args) {
 bool parse_args(int argc, char** argv) {
     args = args_new();
 
-    char c;
-    while ((c = getopt_long(argc, argv, "o:f:N:F:t:v:h:l", LONG_OPTS, NULL)) !=
+    int c;
+    while ((c = getopt_long(argc, argv, "o:f:N:F:t:vhl", LONG_OPTS, NULL)) !=
            -1) {
         switch (c) {
             case 'o': {
-                a_string_copy_cstr(&args.infile, optarg);
+                a_string_copy_cstr(&args.outfile, optarg);
             } break;
             case 'f': {
                 args.format = get_format_from_string(optarg);
@@ -203,14 +206,20 @@ bool parse_args(int argc, char** argv) {
         help();
         return true;
     }
-    a_string_copy_cstr(&args.outfile, argv[optind]);
+    a_string_copy_cstr(&args.infile, argv[optind]);
 
     return false;
 }
 
-static void help(void) { puts(HELP); }
+static void help(void) {
+    puts(HELP);
+    exit(0);
+}
 
-static void license(void) { puts(LICENSE); }
+static void license(void) {
+    puts(LICENSE);
+    exit(0);
+}
 
 static void deinit(void) { args_deinit(&args); }
 
@@ -228,6 +237,11 @@ static FileFormat get_format_from_string(const char* ext) {
         return FMT_TEXT;
 
     return FMT_INVALID;
+}
+
+static FileFormat get_format_from_path(const char* path) {
+    const char* ext = get_file_extension(path);
+    return get_format_from_string(ext);
 }
 
 static usize appvar_to_py(const a_string* in, char** out) {
@@ -250,7 +264,10 @@ static usize appvar_to_py(const a_string* in, char** out) {
     }
 
     *out = strdup(pyfile.src);
-    return pyfile.src_len;
+    puts(*out);
+    usize len = pyfile.src_len;
+    ti_pyfile_free(&pyfile);
+    return len;
 }
 
 static usize py_to_appvar(const a_string* in, char** out) { not_implemented; }
@@ -262,22 +279,30 @@ static usize txt_to_appvar(const a_string* in, char** out) { not_implemented; }
 static char* get_file_extension(const char* src) {
     char* ext;
     const char* dot = strrchr(src, '.');
-    if (!dot || dot == args.filename.data)
+    if (!dot || dot == src)
         ext = NULL;
     else
         ext = (char*)dot + 1;
     return ext;
 }
 
+static void check_args(void) {
+    if (args.infile.len == 0)
+        fatal("no input file provided");
+
+    if (args.outfile.len == 0)
+        fatal("no output file provided");
+}
+
 int main(int argc, char** argv) {
     if (parse_args(argc, argv))
         return -1;
 
-    // get the file extension first
-    const char* infile_ext = get_file_extension(args.infile.data);
+    check_args();
+
     FileFormat infmt = args.format;
     if (args.format == FMT_INVALID)
-        infmt = get_format_from_string(infile_ext);
+        infmt = get_format_from_path(args.infile.data);
 
     a_string infile_contents = a_string_read_file(args.infile.data);
     if (!a_string_valid(&infile_contents)) {
@@ -291,10 +316,8 @@ int main(int argc, char** argv) {
 
     // get the output file format
     FileFormat outfmt = args.target_format;
-    if (args.target_format == FMT_INVALID) {
-        const char* outfile_ext = get_file_extension(args.outfile.data);
-        outfmt = get_format_from_string(outfile_ext);
-    }
+    if (args.target_format == FMT_INVALID)
+        outfmt = get_format_from_path(args.outfile.data);
 
     if (infmt == FMT_INVALID)
         fatal("unrecognized input file format");
@@ -322,12 +345,14 @@ int main(int argc, char** argv) {
             else if (outfmt == FMT_TEXT)
                 out_len = appvar_to_txt(&infile_contents, &out);
             else
-                unreacheable;
+                unreachable;
         } break;
         default:
-            unreacheable;
+            unreachable;
     }
 
+    free(out);
+    a_string_free(&infile_contents);
     deinit();
     return 0;
 }
