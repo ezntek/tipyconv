@@ -8,6 +8,7 @@
  * `LICENSE.md`. Alternatively, find an online copy at
  * https://spdx.org/licenses/BSD-3-Clause.html.
  */
+#include <ctype.h>
 #include <stdlib.h>
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
@@ -121,7 +122,7 @@ static void license(void);
 static void help(void);
 static void deinit(void);
 static Ti_PyFile appvar_to_py(const a_string* in);
-static usize py_to_appvar(const a_string* in);
+static usize py_to_appvar(const a_string* in, char** data);
 static usize appvar_to_txt(const a_string* in);
 static usize txt_to_appvar(const a_string* in);
 
@@ -274,7 +275,43 @@ static Ti_PyFile appvar_to_py(const a_string* in) {
     return pyfile;
 }
 
-static usize py_to_appvar(const a_string* in) { not_implemented; }
+static usize py_to_appvar(const a_string* in, char** data) {
+    char* file_name = NULL;
+    usize file_name_len = 0;
+    char var_name[8] = {0};
+
+    if (args.filename.len != 0) {
+        file_name = args.filename.data;
+        file_name_len = args.filename.len;
+    }
+
+    if (args.varname.len != 0) {
+        strncpy(var_name, args.varname.data, 8);
+    } else {
+        // FIXME: doesnt work on full paths
+        ptrdiff_t diff = strrchr(args.infile.data, '.') - args.infile.data;
+        if (diff > 8)
+            diff = 8;
+        for (size_t i = 0; i < diff; i++) {
+            var_name[i] = toupper(args.infile.data[i]);
+        }
+    }
+
+    // TODO: implement
+    char* finfo = NULL;
+
+    Ti_PyFile f = ti_pyfile_new_with_metadata_full(
+        in->data, in->len, file_name, file_name_len, finfo, var_name);
+
+    char* buf = NULL;
+    usize len = ti_pyfile_dump(&f, &buf);
+    if (len == -1)
+        return -1;
+
+    ti_pyfile_free(&f);
+    *data = buf;
+    return len;
+}
 
 static usize appvar_to_txt(const a_string* in) { not_implemented; }
 
@@ -290,15 +327,60 @@ static char* get_file_extension(const char* src) {
     return ext;
 }
 
+static char* determine_output_path(void) {
+    a_string res = a_string_with_capacity(20);
+
+    if (args.outfile.len != 0) {
+        a_string_append_astr(&res, &args.outfile);
+    } else if (args.varname.len != 0) {
+        char buf[9] = {0}; // FIXME: add fn in a_string
+        strncpy(buf, args.varname.data, 8);
+        // a_string_appendf?
+        a_string_append_cstr(&res, "./");
+        a_string_append_cstr(&res, buf);
+        a_string_append_cstr(&res, ".8xv");
+    } else {
+        unreachable; // FIXME: remove
+    }
+
+    return res.data;
+}
+
+static bool write_appvar(const char* buf, usize buf_len, const char* path) {
+    FILE* fp = fopen(path, "w");
+    if (!fp)
+        return false;
+
+    usize bytes_written = fwrite(buf, 1, buf_len, fp);
+    if (bytes_written != buf_len)
+        return false;
+
+    fclose(fp);
+    return true;
+}
+
 static bool convert(const a_string* in, FileFormat infmt, FileFormat outfmt) {
-    disasm(in->data, in->len);
+    // disasm(in->data, in->len);
 
     switch (infmt) {
         case FMT_PY: {
             if (outfmt == FMT_TEXT) {
                 warn("will not convert from a Python file to a text file!");
             } else {
-                not_implemented;
+                char* out = NULL;
+                usize len = py_to_appvar(in, &out);
+                if (len == -1)
+                    return false;
+                char* out_path = determine_output_path();
+                if (out_path == NULL)
+                    return false;
+                if (!write_appvar(out, len, out_path)) {
+                    free(out);
+                    free(out_path);
+                    return false;
+                }
+                free(out);
+                free(out_path);
             }
         } break;
         case FMT_TEXT: {
@@ -310,6 +392,7 @@ static bool convert(const a_string* in, FileFormat infmt, FileFormat outfmt) {
         } break;
         case FMT_APPVAR: {
             if (outfmt == FMT_PY) {
+                disasm(in->data, in->len);
                 Ti_PyFile pyf = appvar_to_py(in);
                 const char* path = NULL;
                 if (args.outfile.len != 0)
@@ -317,6 +400,8 @@ static bool convert(const a_string* in, FileFormat infmt, FileFormat outfmt) {
 
                 if (!ti_pyfile_write_file(&pyf, path)) {
                     ti_pyfile_free(&pyf);
+                    fatal("failed to write output file: \"%s\"",
+                          strerror(errno));
                     return false;
                 }
 

@@ -335,7 +335,7 @@ bool ti_pyfile_write_file(const Ti_PyFile* f, const char* path) {
     }
 
     // psst! this doesnt handle a short write
-    size_t bytes_written = fwrite(f->src, 1, f->src_len, out_fp);
+    usize bytes_written = fwrite(f->src, 1, f->src_len, out_fp);
     if (bytes_written != f->src_len) {
         free(actual_path);
         return false;
