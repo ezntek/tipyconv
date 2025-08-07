@@ -459,20 +459,6 @@ Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
     check_alloc(src);
     strncpy(src, &data[src_start], src_len);
 
-    // we do not want to include the checksum in the stream already
-    u16 checksum = _ti_pyfile_get_checksum(data, len - 2);
-    u16 file_checksum = _ti_pyfile_get_word(&data[src_start + src_len]);
-
-    if (checksum != file_checksum) {
-        printf("wanted: %d, got: %d\n", file_checksum, checksum);
-        if (pres)
-            *pres = TI_CHECKSUM_INCORRECT;
-        free(src);
-        if (file_name)
-            free(file_name);
-        return ti_pyfile_new_invalid();
-    }
-
     res.src = src;
     res.src_len = src_len;
 

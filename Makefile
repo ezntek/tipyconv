@@ -55,6 +55,6 @@ tarball: deps
 distclean: clean cleandeps
 
 clean:
-	rm -rf tipyconv tipyconv.tar.gz tipyconv $(OBJ)
+	rm -rf tipyconv tipyconv.tar.gz tipyconv *.8Xv *.8xv $(OBJ)
 
 .PHONY: clean cleanall
