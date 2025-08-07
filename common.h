@@ -115,24 +115,20 @@ typedef double f64;
 
 #define VERSION "0.1.0"
 
+#define VERSION_TXT "tipyconv version " VERSION
+
 #define HELP                                                                   \
     "usage: tipyconv [OPTIONS] <filename>\n"                                   \
     "Options:\n"                                                               \
     "  -o, --outfile:       Output path of conversion\n"                       \
-    "  -f, --input-format:  Format of input file\n"                            \
-    "  -t, --target-format: Format of output file\n"                           \
-    "  -N, --varname:       Name of file in calculator (only used for text "   \
-    "-> 8xv)\n"                                                                \
-    "  -F, --filename:      Long file name in calculator (only used for text " \
-    "-> 8xv)\n"                                                                \
+    "  -n, --varname:       Name of file in calculator\n"                      \
     "  -V, --version:       Show the version\n"                                \
     "  -v, --verbose:       Show verbose output\n"                             \
     "  -h, --help:          Show this help screen\n"                           \
     "  -l, --license:       Show the license\n"                                \
-    "The source file format will be determined by the argument passed to "     \
-    "--format,\n"                                                              \
-    "the file extension of <filename> in that order.\n\n"                      \
-    "version " VERSION "\n"
+    "The format of the output file can be inferred from the input "            \
+    "file, but\n"                                                              \
+    "passing in an invalid input file is disallowed."
 
 #define LICENSE                                                                \
     "BSD 3-Clause License\n"                                                   \
