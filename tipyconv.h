@@ -258,7 +258,7 @@ usize ti_pyfile_dump(Ti_PyFile* f, char** dest) {
     // we at least need that much
     a_vector_u8 res = a_vector_u8_with_capacity(81);
     if (!a_vector_u8_valid(&res))
-        return -1;
+        panic("failed to allocate buffer");
 
     // header
     a_vector_u8_append_slice(&res, (u8*)FILE_HEADER, LENGTH(FILE_HEADER));

@@ -112,7 +112,6 @@ typedef double f64;
     }
 
 #define not_implemented log_fatal("feature not implemented")
-#define unreachable     panic("reached unreachable code")
 
 #define VERSION "0.1.0"
 
@@ -120,7 +119,7 @@ typedef double f64;
     "usage: tipyconv [OPTIONS] <filename>\n"                                   \
     "Options:\n"                                                               \
     "  -o, --outfile:       Output path of conversion\n"                       \
-    "  -f, --format:        Format of input file\n"                            \
+    "  -f, --input-format:  Format of input file\n"                            \
     "  -t, --target-format: Format of output file\n"                           \
     "  -N, --varname:       Name of file in calculator (only used for text "   \
     "-> 8xv)\n"                                                                \

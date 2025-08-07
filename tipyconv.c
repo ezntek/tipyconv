@@ -8,14 +8,16 @@
  * `LICENSE.md`. Alternatively, find an online copy at
  * https://spdx.org/licenses/BSD-3-Clause.html.
  */
-#include <ctype.h>
-#include <stdlib.h>
+#include <stdbool.h>
+#include <stddef.h>
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
 
+#include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -33,8 +35,7 @@
     }
 #define warn(...)                                                              \
     {                                                                          \
-        if (args.verbose)                                                      \
-            log_warn(__VA_ARGS__);                                             \
+        log_warn(__VA_ARGS__);                                                 \
     }
 #define error(...)                                                             \
     {                                                                          \
@@ -45,59 +46,6 @@
         log_fatal(__VA_ARGS__);                                                \
     }
 
-void disasm_bytes(const char* title, const char* data, usize len) {
-    printf("\033[1m%s: \033[0m", title);
-    for (usize i = 0; i < len; i++) {
-        unsigned char byte = data[i];
-        printf("%02x", byte);
-        // printf("%02d", (char)data[i]);
-        if (i % 2 == 1)
-            putchar(' ');
-    }
-    putchar('\n');
-}
-
-void disasm_string(const char* title, const char* data, usize len) {
-    printf("\033[1m%s: \033[0m\"%.*s\"\n", title, (int)len, data);
-}
-
-u16 disasm_num(const char* title, const char* data) {
-    u16 res = (u16)((u8)(data[0]) | (u8)(data[1] << 8));
-    printf("\033[1m%s: \033[0m%d\n", title, res);
-    return res;
-}
-
-void disasm(const char* data, usize len) {
-    // header
-    disasm_bytes("hdr", &data[0], 11);
-    disasm_string("finfo", &data[0xB], 42);
-    disasm_num("dsize", &data[0x35]);
-    disasm_bytes("psize", &data[0x39], 2);
-    disasm_num("psize", &data[0x39]);
-    disasm_bytes("vid", &data[0x3B], 1);
-    disasm_string("vname", &data[0x3C], 8);
-    disasm_num("psize", &data[0x46]);
-    u16 plen = disasm_num("plen", &data[0x48]);
-    disasm_string("pyfmt", &data[0x4A], 4);
-    plen -= 5; // skip past PYCD and \0 because it will always be present
-
-    usize pstart = 0x4F; // start of payload
-    // there might be a filename here used to transfer stuff back on disk
-    if (data[0x4E] != '\0') {
-        // contains null terminator, likely a full buffer length
-        u8 filename_len = data[0x4E];
-        // 0x4F should be SOH
-        disasm_string("fname", &data[0x50],
-                      filename_len); // should stop at nullterm anyway
-        pstart = 0x50 + filename_len;
-        plen -= 1 + filename_len; // SOH + filename length (incl \0)
-    }
-
-    disasm_string("payload", &data[pstart], plen);
-    const size_t after_payload = pstart + plen;
-    disasm_bytes("checksum", &data[after_payload], len - after_payload);
-}
-
 typedef enum {
     FMT_INVALID = 0,
     FMT_APPVAR = 1,
@@ -106,36 +54,20 @@ typedef enum {
 } FileFormat;
 
 typedef struct {
-    a_string infile;
-    a_string outfile;
-    a_string varname;
-    a_string filename;
-    FileFormat format;
-    FileFormat target_format;
+    a_string in_path;
+    a_string out_path;
+    a_string var_name;  // appvar
+    a_string file_name; // appvar
+    FileFormat in_fmt;
+    FileFormat out_fmt;
     bool verbose;
     bool help;
     bool license;
 } Args;
 
-static bool parse_args(int argc, char** argv);
-static void license(void);
-static void help(void);
-static void deinit(void);
-static Ti_PyFile appvar_to_py(const a_string* in);
-static usize py_to_appvar(const a_string* in, char** data);
-static usize appvar_to_txt(const a_string* in);
-static usize txt_to_appvar(const a_string* in);
-
-static Args args_new(void);
-static void args_deinit(Args* args);
-
-static char* get_file_extension(const char* src);
-static FileFormat get_format_from_string(const char* ext);
-static void check_args(void);
-
 static const struct option LONG_OPTS[] = {
     {"outfile", required_argument, 0, 'o'},
-    {"format", required_argument, 0, 'f'},
+    {"input-format", required_argument, 0, 'f'},
     {"target-format", required_argument, 0, 't'},
     {"varname", required_argument, 0, 'N'},
     {"filename", required_argument, 0, 'F'},
@@ -148,43 +80,107 @@ static Args args;
 
 // === function decls ===
 
-static Args args_new(void) {
+// returns a heap allocated char*
+char* get_file_name(const char* src) {
+    const char* base = basename(src);
+    const char* dot = strrchr(base, '.');
+    ptrdiff_t diff = dot - base;
+    char* res = calloc(diff + 1, 1);
+    check_alloc(res);
+    strncpy(res, base, diff);
+    return res;
+}
+
+char* get_file_extension(const char* src) {
+    const char* base = basename(src);
+    char* ext;
+    const char* dot = strrchr(base, '.');
+    if (!dot || dot == base)
+        ext = NULL;
+    else
+        ext = (char*)dot + 1;
+    return ext;
+}
+
+bool file_exists(const char* path) {
+    FILE* fp = fopen(path, "r");
+    if (!fp) {
+        return false;
+    }
+    fclose(fp);
+    return true;
+}
+
+Args args_new(void) {
     return (Args){
-        .infile = a_string_with_capacity(25),
-        .outfile = a_string_with_capacity(25),
-        .varname = a_string_with_capacity(25),
-        .filename = a_string_with_capacity(25),
+        .in_path = a_string_with_capacity(25),
+        .out_path = a_string_with_capacity(25),
+        .var_name = a_string_with_capacity(25),
+        .file_name = a_string_with_capacity(25),
     };
 }
 
-static void args_deinit(Args* args) {
-    a_string_free(&args->infile);
-    a_string_free(&args->outfile);
-    a_string_free(&args->varname);
-    a_string_free(&args->filename);
+void args_deinit(Args* args) {
+    a_string_free(&args->in_path);
+    a_string_free(&args->out_path);
+    a_string_free(&args->var_name);
+    a_string_free(&args->file_name);
+}
+
+FileFormat get_format_from_string(const char* ext) {
+    if (ext == NULL)
+        return FMT_INVALID;
+
+    if (!strcasecmp(ext, "py") || !strcasecmp(ext, "python"))
+        return FMT_PY;
+    else if (!strcasecmp(ext, "8xv") || !strcasecmp(ext, "appvar"))
+        return FMT_APPVAR;
+    else if (!strcasecmp(ext, "txt") || !strcasecmp(ext, "text"))
+        return FMT_TEXT;
+
+    return FMT_INVALID;
+}
+
+FileFormat get_format_from_path(const char* path) {
+    const char* ext = get_file_extension(path);
+    return get_format_from_string(ext);
+}
+
+void help(void) {
+    puts(HELP);
+    exit(0);
+}
+
+void license(void) {
+    puts(LICENSE);
+    exit(0);
 }
 
 bool parse_args(int argc, char** argv) {
     args = args_new();
 
     int c;
-    while ((c = getopt_long(argc, argv, "o:f:N:F:t:vhl", LONG_OPTS, NULL)) !=
+    while ((c = getopt_long(argc, argv, "o:f:N:F:t:Vvhl", LONG_OPTS, NULL)) !=
            -1) {
         switch (c) {
             case 'o': {
-                a_string_copy_cstr(&args.outfile, optarg);
+                a_string_copy_cstr(&args.out_path, optarg);
             } break;
             case 'f': {
-                args.format = get_format_from_string(optarg);
+                args.in_fmt = get_format_from_string(optarg);
             } break;
             case 'N': {
-                a_string_copy_cstr(&args.varname, optarg);
+                a_string_copy_cstr(&args.var_name, optarg);
             } break;
             case 'F': {
-                a_string_copy_cstr(&args.filename, optarg);
+                a_string_copy_cstr(&args.file_name, optarg);
             } break;
             case 't': {
-                args.target_format = get_format_from_string(optarg);
+                args.out_fmt = get_format_from_string(optarg);
+            } break;
+            case 'V': {
+                printf("version " VERSION "\n");
+                exit(0);
             } break;
             case 'v': {
                 args.verbose = true;
@@ -206,256 +202,240 @@ bool parse_args(int argc, char** argv) {
     if (optind >= argc) {
         error("must supply input file as positional argument!");
         help();
-        return true;
+        return false;
     }
-    a_string_copy_cstr(&args.infile, argv[optind]);
+    a_string_copy_cstr(&args.in_path, argv[optind]);
 
-    check_args();
-
-    return false;
-}
-
-static void check_args(void) {
-    if (args.infile.len == 0)
+    if (args.in_path.len == 0)
         fatal("no input file provided");
-}
 
-static void help(void) {
-    puts(HELP);
-    exit(0);
-}
-
-static void license(void) {
-    puts(LICENSE);
-    exit(0);
-}
-
-static void deinit(void) { args_deinit(&args); }
-
-static FileFormat get_format_from_string(const char* ext) {
-    if (ext == NULL)
-        return FMT_INVALID;
-
-    if (!strcasecmp(ext, "py"))
-        return FMT_PY;
-    else if (!strcasecmp(ext, "8xv"))
-        return FMT_APPVAR;
-    else if (!strcasecmp(ext, "appvar"))
-        return FMT_APPVAR;
-    else if (!strcasecmp(ext, "txt"))
-        return FMT_TEXT;
-
-    return FMT_INVALID;
-}
-
-static FileFormat get_format_from_path(const char* path) {
-    const char* ext = get_file_extension(path);
-    return get_format_from_string(ext);
-}
-
-static Ti_PyFile appvar_to_py(const a_string* in) {
-    Ti_ParseResult res = {0};
-    Ti_PyFile pyfile = ti_pyfile_parse(in->data, in->len, &res);
-
-    switch (res) {
-        case TI_PARSE_OK: {
-            info("successfully parsed");
-        } break;
-        case TI_PARSE_ERROR: {
-            fatal("failed to parse");
-        } break;
-        case TI_INVALID_FORMAT: {
-            fatal("invalid file format");
-        } break;
-        case TI_CHECKSUM_INCORRECT: {
-            fatal("incorrect checksum");
-        } break;
-    }
-
-    return pyfile;
-}
-
-static usize py_to_appvar(const a_string* in, char** data) {
-    char* file_name = NULL;
-    usize file_name_len = 0;
-    char var_name[8] = {0};
-
-    if (args.filename.len != 0) {
-        file_name = args.filename.data;
-        file_name_len = args.filename.len;
-    }
-
-    if (args.varname.len != 0) {
-        strncpy(var_name, args.varname.data, 8);
-    } else {
-        // FIXME: doesnt work on full paths
-        ptrdiff_t diff = strrchr(args.infile.data, '.') - args.infile.data;
-        if (diff > 8)
-            diff = 8;
-        for (size_t i = 0; i < diff; i++) {
-            var_name[i] = toupper(args.infile.data[i]);
-        }
-    }
-
-    // TODO: implement
-    char* finfo = NULL;
-
-    Ti_PyFile f = ti_pyfile_new_with_metadata_full(
-        in->data, in->len, file_name, file_name_len, finfo, var_name);
-
-    char* buf = NULL;
-    usize len = ti_pyfile_dump(&f, &buf);
-    if (len == -1)
-        return -1;
-
-    ti_pyfile_free(&f);
-    *data = buf;
-    return len;
-}
-
-static usize appvar_to_txt(const a_string* in) { not_implemented; }
-
-static usize txt_to_appvar(const a_string* in) { not_implemented; }
-
-static char* get_file_extension(const char* src) {
-    char* ext;
-    const char* dot = strrchr(src, '.');
-    if (!dot || dot == src)
-        ext = NULL;
-    else
-        ext = (char*)dot + 1;
-    return ext;
-}
-
-static char* determine_output_path(void) {
-    a_string res = a_string_with_capacity(20);
-
-    if (args.outfile.len != 0) {
-        a_string_append_astr(&res, &args.outfile);
-    } else if (args.varname.len != 0) {
-        char buf[9] = {0}; // FIXME: add fn in a_string
-        strncpy(buf, args.varname.data, 8);
-        // a_string_appendf?
-        a_string_append_cstr(&res, "./");
-        a_string_append_cstr(&res, buf);
-        a_string_append_cstr(&res, ".8xv");
-    } else {
-        unreachable; // FIXME: remove
-    }
-
-    return res.data;
-}
-
-static bool write_appvar(const char* buf, usize buf_len, const char* path) {
-    FILE* fp = fopen(path, "w");
-    if (!fp)
-        return false;
-
-    usize bytes_written = fwrite(buf, 1, buf_len, fp);
-    if (bytes_written != buf_len)
-        return false;
-
-    fclose(fp);
     return true;
 }
 
-static bool convert(const a_string* in, FileFormat infmt, FileFormat outfmt) {
-    // disasm(in->data, in->len);
+// guess the output file format based on the input format
+FileFormat guess_output_file_format(FileFormat in_fmt) {
+    FileFormat out_fmt = get_format_from_path(args.out_path.data);
+    if (out_fmt != FMT_INVALID)
+        return out_fmt;
 
-    switch (infmt) {
-        case FMT_PY: {
-            if (outfmt == FMT_TEXT) {
-                warn("will not convert from a Python file to a text file!");
-            } else {
-                char* out = NULL;
-                usize len = py_to_appvar(in, &out);
-                if (len == -1)
-                    return false;
-                char* out_path = determine_output_path();
-                if (out_path == NULL)
-                    return false;
-                if (!write_appvar(out, len, out_path)) {
-                    free(out);
-                    free(out_path);
-                    return false;
-                }
-                free(out);
-                free(out_path);
-            }
+    if (in_fmt == FMT_PY || in_fmt == FMT_TEXT)
+        return FMT_APPVAR;
+
+    if (in_fmt == FMT_APPVAR && (out_fmt == FMT_PY || out_fmt == FMT_TEXT)) {
+        fatal("could not infer the output file type! please specify an output "
+              "file type or a file path.");
+    }
+
+    return out_fmt;
+}
+
+// guesses the output path of a Ti_PyFile
+a_string guess_python_file_path(const Ti_PyFile* pyfile) {
+    if (args.out_path.len != 0)
+        return a_string_dupe(&args.out_path);
+
+    a_string res = astr("./");
+
+    if (pyfile->file_name) {
+        a_string_append(&res, pyfile->file_name);
+        return res;
+    }
+
+    if (strlen(pyfile->var_name) == 0)
+        a_string_append(&res, "PYTHON01");
+    else
+        a_string_append(&res, pyfile->var_name);
+    a_string_append(&res, ".py");
+
+    return res;
+}
+
+char* get_var_name_from_path(const char* path) {
+    char* res = calloc(9, 1);
+    check_alloc(res);
+    char* name = get_file_name(path);
+    for (usize i = 0; i < 8; i++) {
+        if (name[i] == '\0')
+            break;
+
+        res[i] = toupper(name[i]);
+    }
+    free(name);
+    return res;
+}
+
+// guesses the output path of an AppVar
+a_string guess_appvar_path(const Ti_PyFile* pyfile) {
+    if (args.out_path.len != 0)
+        return a_string_dupe(&args.out_path);
+
+    a_string res = astr("./");
+    if (strlen(pyfile->var_name) > 0) {
+        a_string_append(&res, pyfile->var_name);
+    } else {
+        warn("AppVar does not have a variable name!");
+        char* var_name = get_var_name_from_path(args.in_path.data);
+        a_string_append(&res, var_name);
+        free(var_name);
+    }
+    a_string_append(&res, ".8xv");
+
+    return res;
+}
+
+bool convert_appvar(const a_string* in_file, FileFormat out_fmt) {
+    if (out_fmt == FMT_TEXT) {
+        not_implemented;
+    } else {
+        Ti_ParseResult res = {0};
+        Ti_PyFile pyfile = ti_pyfile_parse(in_file->data, in_file->len, &res);
+
+        switch (res) {
+            case TI_PARSE_OK: {
+                info("successfully parsed");
+            } break;
+            case TI_PARSE_ERROR: {
+                fatal("failed to parse AppVar!");
+            } break;
+            case TI_INVALID_FORMAT: {
+                fatal("AppVar has an incorrect file format!");
+            } break;
+            case TI_CHECKSUM_INCORRECT: {
+                fatal("AppVar checksum verification failed");
+            } break;
+        }
+
+        a_string out_path = guess_python_file_path(&pyfile);
+
+        if (file_exists(out_path.data))
+            warn("file %s already exists on disk, overwriting", out_path.data);
+
+        FILE* out_fp = fopen(out_path.data, "w");
+        if (!out_fp)
+            fatal("could not open output path for writing: \"%s\"",
+                  strerror(errno));
+
+        usize bytes_written = fwrite(pyfile.src, 1, pyfile.src_len, out_fp);
+        if (bytes_written < pyfile.src_len)
+            fatal("short write-out on Python file at \"%s\"", out_path.data);
+
+        ti_pyfile_free(&pyfile);
+        a_string_free(&out_path);
+    }
+
+    return true;
+}
+
+bool convert_text(const a_string* in_file, FileFormat out_fmt) {
+    not_implemented;
+}
+
+bool convert_py(const a_string* in_file, FileFormat out_fmt) {
+    const char* file_name = basename(args.in_path.data);
+    char* finfo = NULL; // TODO: implement
+    char* var_name;
+    if (args.var_name.len == 0)
+        var_name = get_var_name_from_path(args.in_path.data);
+    else
+        var_name = strdup(args.var_name.data);
+
+    Ti_PyFile pyfile =
+        ti_pyfile_new_with_metadata_full(in_file->data, in_file->len, file_name,
+                                         strlen(file_name), finfo, var_name);
+
+    char* buf = NULL;
+    usize len = ti_pyfile_dump(&pyfile, &buf);
+    if (len == -1) {
+        free(var_name);
+        ti_pyfile_free(&pyfile);
+        error("failed to dump new AppVar to binary format");
+        return false;
+    }
+
+    a_string out_path = guess_appvar_path(&pyfile);
+    if (file_exists(out_path.data))
+        warn("AppVar at path \"%s\" already exists, overwriting",
+             out_path.data);
+
+    FILE* fp = fopen(out_path.data, "w");
+    if (!fp)
+        fatal("could not open AppVar for writing: \"%s\"", strerror(errno));
+
+    usize bytes_written = fwrite(buf, 1, len, fp);
+    if (bytes_written < len)
+        panic("short write-out on AppVar!");
+
+    free(buf);
+    fclose(fp);
+    free(var_name);
+    ti_pyfile_free(&pyfile);
+    a_string_free(&out_path);
+
+    return true;
+}
+
+bool convert(FileFormat in_fmt, FileFormat out_fmt) {
+    a_string in_file = a_string_read_file(args.in_path.data);
+    if (!a_string_valid(&in_file)) {
+        error("failed to read input file: \"%s\"",
+              strerror(errno)) return false;
+    }
+
+    switch (in_fmt) {
+        case FMT_APPVAR: {
+            if (!convert_appvar(&in_file, out_fmt))
+                return false;
         } break;
         case FMT_TEXT: {
-            if (outfmt == FMT_PY) {
-                warn("will not convert from a text file to a Python file!");
-            } else {
-                not_implemented;
-            }
-        } break;
-        case FMT_APPVAR: {
-            if (outfmt == FMT_PY) {
-                disasm(in->data, in->len);
-                Ti_PyFile pyf = appvar_to_py(in);
-                const char* path = NULL;
-                if (args.outfile.len != 0)
-                    path = args.outfile.data;
+            if (out_fmt == FMT_PY)
+                error("will not convert from a Python file to a text file!");
 
-                if (!ti_pyfile_write_file(&pyf, path)) {
-                    ti_pyfile_free(&pyf);
-                    fatal("failed to write output file: \"%s\"",
-                          strerror(errno));
-                    return false;
-                }
-
-                ti_pyfile_free(&pyf);
-            } else if (outfmt == FMT_TEXT) {
-                not_implemented;
-            } else {
-                fatal("could not infer output file format, please specify it "
-                      "with a file path or -t");
-            }
+            if (!convert_text(&in_file, out_fmt))
+                return false;
         } break;
-        default:
-            unreachable;
+        case FMT_PY: {
+            if (out_fmt == FMT_TEXT)
+                error("will not convert from a Python file to a text file!");
+
+            if (!convert_py(&in_file, out_fmt))
+                return false;
+        } break;
+        case FMT_INVALID: {
+            panic("unreachable");
+        } break;
     }
+
+    a_string_free(&in_file);
     return true;
 }
 
 int main(int argc, char** argv) {
-    if (parse_args(argc, argv))
-        return -1;
+    if (!parse_args(argc, argv))
+        return EXIT_FAILURE;
 
-    // get input file format
-    FileFormat infmt = args.format;
-    if (args.format == FMT_INVALID)
-        infmt = get_format_from_path(args.infile.data);
+    FileFormat in_fmt = args.in_fmt;
+    if (args.in_fmt == FMT_INVALID)
+        in_fmt = get_format_from_path(args.in_path.data);
 
-    a_string infile_contents = a_string_read_file(args.infile.data);
-    if (!a_string_valid(&infile_contents)) {
-        deinit();
-        fatal("failed to read input file: %s", strerror(errno));
-    }
+    FileFormat out_fmt = args.out_fmt;
+    if (args.out_fmt == FMT_INVALID)
+        out_fmt = guess_output_file_format(in_fmt);
 
-    if (infmt == FMT_INVALID)
-        if (ti_is_appvar(infile_contents.data))
-            infmt = FMT_APPVAR;
-
-    // get the output file format
-    FileFormat outfmt = args.target_format;
-    if (args.target_format == FMT_INVALID)
-        outfmt = get_format_from_path(args.outfile.data);
-
-    if (infmt == FMT_INVALID)
+    if (in_fmt == FMT_INVALID)
         fatal("unrecognized input file format");
 
-    if (infmt == outfmt) {
+    if (out_fmt == FMT_INVALID)
+        fatal("unrecognized output file format");
+
+    if (in_fmt == out_fmt) {
         warn("input and output formats are the same, no conversion done");
-        return 1;
+        return EXIT_FAILURE;
     }
 
-    if (!convert(&infile_contents, infmt, outfmt)) {
+    if (!convert(in_fmt, out_fmt)) {
         fatal("error occurred during conversion!");
     }
 
-    a_string_free(&infile_contents);
-    deinit();
-    return 0;
+    args_deinit(&args);
+    return EXIT_SUCCESS;
 }
