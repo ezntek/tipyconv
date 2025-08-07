@@ -303,17 +303,14 @@ bool convert_appvar(const a_string* in_file) {
 }
 
 bool convert_py(const a_string* in_file) {
-    const char* file_name = basename(args.in_path.data);
-    char* finfo = NULL; // TODO: implement
     char* var_name;
     if (args.var_name.len == 0)
         var_name = get_var_name_from_path(args.in_path.data);
     else
         var_name = strdup(args.var_name.data);
 
-    Ti_PyFile pyfile =
-        ti_pyfile_new_with_metadata_full(in_file->data, in_file->len, file_name,
-                                         strlen(file_name), finfo, var_name);
+    Ti_PyFile pyfile = ti_pyfile_new_with_metadata_full(
+        in_file->data, in_file->len, NULL, 0, NULL, var_name);
 
     char* buf = NULL;
     usize len = ti_pyfile_dump(&pyfile, &buf);
@@ -341,7 +338,7 @@ bool convert_py(const a_string* in_file) {
     return true;
 }
 
-bool convert(Format in_fmt, Format out_fmt) {
+bool convert(Format in_fmt) {
     a_string in_file = a_string_read_file(args.in_path.data);
     if (!a_string_valid(&in_file)) {
         error("failed to read input file: \"%s\"",
@@ -373,6 +370,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
 
     info(VERSION_TXT);
+
     Format in_fmt = get_format_from_path(args.in_path.data);
     Format out_fmt = get_output_format(in_fmt);
 
@@ -387,7 +385,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    if (!convert(in_fmt, out_fmt)) {
+    if (!convert(in_fmt)) {
         fatal("error occurred during conversion!");
     }
 

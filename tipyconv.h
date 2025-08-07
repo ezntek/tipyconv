@@ -163,9 +163,75 @@ bool ti_is_appvar(const char* data);
 
 #define BSWORD(w) ((u8[]){(u8)w, (u8)(w >> 8)})
 
-A_VECTOR_DECL(u8)
-
-A_VECTOR_IMPL(u8)
+// NOTE: since this aims to be a single-header library with no dependencies, but
+// a dynamic array of sorts is needed, a part of a_vector is bundled.
+typedef struct {
+    u8* data;
+    size_t len;
+    size_t cap;
+} __ti_vector_u8;
+static __ti_vector_u8 __ti_vector_u8_with_capacity(size_t cap) {
+    __ti_vector_u8 res = {.len = 0, .cap = cap};
+    res.data = calloc(res.cap, sizeof(u8));
+    check_alloc(res.data);
+    return res;
+}
+void __ti_vector_u8_free(__ti_vector_u8* v) {
+    free(v->data);
+    v->len = (size_t)-1;
+    v->cap = (size_t)-1;
+}
+static _Bool __ti_vector_u8_valid(__ti_vector_u8* v) {
+    return !(v->len == (size_t)-1 || v->cap == (size_t)-1 ||
+             v->data == ((void*)0));
+}
+static void __ti_vector_u8_reserve(__ti_vector_u8* v, size_t cap) {
+    if (!__ti_vector_u8_valid(v)) {
+        panic("the vector is invalid");
+    }
+    v->data = realloc(v->data, sizeof(u8) * cap);
+    check_alloc(v->data);
+    v->cap = cap;
+}
+static void __ti_vector_u8_append(__ti_vector_u8* v, u8 new_elem) {
+    if (!__ti_vector_u8_valid(v)) {
+        panic("the vector is invalid");
+    }
+    if (v->len + 1 > v->cap) {
+        __ti_vector_u8_reserve(v, v->cap * 3);
+    }
+    v->data[v->len++] = new_elem;
+}
+static void __ti_vector_u8_append_vector(__ti_vector_u8* v,
+                                         const __ti_vector_u8* other) {
+    if (!__ti_vector_u8_valid(v)) {
+        panic("the vector is invalid");
+    }
+    size_t len = v->len + other->len;
+    if (len > v->cap) {
+        size_t sz = v->cap;
+        while (sz < len)
+            sz *= 3;
+        __ti_vector_u8_reserve(v, sz);
+    }
+    memcpy(&v->data[v->len], other->data, sizeof(u8) * other->len);
+    v->len += other->len;
+}
+static void __ti_vector_u8_append_slice(__ti_vector_u8* v, const u8* data,
+                                        size_t nitems) {
+    if (!__ti_vector_u8_valid(v)) {
+        panic("the vector is invalid");
+    }
+    size_t len = v->len + nitems;
+    if (len > v->cap) {
+        size_t sz = v->cap;
+        while (sz < len)
+            sz *= 3;
+        __ti_vector_u8_reserve(v, sz);
+    }
+    memcpy(&v->data[v->len], data, sizeof(u8) * nitems);
+    v->len += nitems;
+}
 
 static const char FILE_HEADER[] = {0x2a, 0x2a, 0x54, 0x49, 0x38, 0x33,
                                    0x46, 0x2a, 0x1a, 0x0a, 0x00};
@@ -231,17 +297,17 @@ Ti_PyFile ti_pyfile_new_with_metadata_full(const char* src, u16 src_len,
 
 Ti_PyFile ti_pyfile_new_invalid(void) { return (Ti_PyFile){0}; }
 
-static a_vector_u8 _ti_pyfile_dump_payload(Ti_PyFile* f) {
-    a_vector_u8 res =
-        a_vector_u8_with_capacity(f->src_len + f->file_name_len + 8);
+static __ti_vector_u8 _ti_pyfile_dump_payload(Ti_PyFile* f) {
+    __ti_vector_u8 res =
+        __ti_vector_u8_with_capacity(f->src_len + f->file_name_len + 8);
 
-    a_vector_u8_append_slice(&res, (u8*)"PYCD", 4);
+    __ti_vector_u8_append_slice(&res, (u8*)"PYCD", 4);
     if (f->file_name) {
-        a_vector_u8_append_slice(&res, (u8[]){f->file_name_len, 0x01}, 2);
-        a_vector_u8_append_slice(&res, (u8*)f->file_name, f->file_name_len);
+        __ti_vector_u8_append_slice(&res, (u8[]){f->file_name_len, 0x01}, 2);
+        __ti_vector_u8_append_slice(&res, (u8*)f->file_name, f->file_name_len);
     }
-    a_vector_u8_append(&res, 0x0);
-    a_vector_u8_append_slice(&res, (u8*)f->src, f->src_len);
+    __ti_vector_u8_append(&res, 0x0);
+    __ti_vector_u8_append_slice(&res, (u8*)f->src, f->src_len);
 
     return res;
 }
@@ -256,14 +322,14 @@ static u16 _ti_pyfile_get_checksum(const char* data, usize len) {
 
 usize ti_pyfile_dump(Ti_PyFile* f, char** dest) {
     // we at least need that much
-    a_vector_u8 res = a_vector_u8_with_capacity(81);
-    if (!a_vector_u8_valid(&res))
+    __ti_vector_u8 res = __ti_vector_u8_with_capacity(81);
+    if (!__ti_vector_u8_valid(&res))
         panic("failed to allocate buffer");
 
     // header
-    a_vector_u8_append_slice(&res, (u8*)FILE_HEADER, LENGTH(FILE_HEADER));
+    __ti_vector_u8_append_slice(&res, (u8*)FILE_HEADER, LENGTH(FILE_HEADER));
     // file info
-    a_vector_u8_append_slice(&res, (u8*)f->file_info, FILE_INFO_SZ);
+    __ti_vector_u8_append_slice(&res, (u8*)f->file_info, FILE_INFO_SZ);
 
     // 19 bytes (metadata) + sizeof("PYCD\0")
     u16 dsize = 24 + f->src_len;
@@ -273,35 +339,35 @@ usize ti_pyfile_dump(Ti_PyFile* f, char** dest) {
     }
 
     // hacky but whatever!
-    a_vector_u8_append_slice(&res, BSWORD(dsize), 2);
-    a_vector_u8_append_slice(&res, (u8[]){0x0d, 0x00}, 2);
+    __ti_vector_u8_append_slice(&res, BSWORD(dsize), 2);
+    __ti_vector_u8_append_slice(&res, (u8[]){0x0d, 0x00}, 2);
 
-    a_vector_u8 payload = _ti_pyfile_dump_payload(f);
+    __ti_vector_u8 payload = _ti_pyfile_dump_payload(f);
     u16 psize = (u16)payload.len + 2;
 
     // payload size
-    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
+    __ti_vector_u8_append_slice(&res, BSWORD(psize), 2);
 
     // var id
-    a_vector_u8_append(&res, 0x15);
+    __ti_vector_u8_append(&res, 0x15);
 
     // var name
-    a_vector_u8_append_slice(&res, (u8*)f->var_name, 8);
+    __ti_vector_u8_append_slice(&res, (u8*)f->var_name, 8);
 
     // padding
-    a_vector_u8_append_slice(&res, (u8*)&(u16){0}, 2);
+    __ti_vector_u8_append_slice(&res, (u8*)&(u16){0}, 2);
 
     // payload size
-    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
+    __ti_vector_u8_append_slice(&res, BSWORD(psize), 2);
     psize -= 2;
-    a_vector_u8_append_slice(&res, BSWORD(psize), 2);
-    a_vector_u8_append_vector(&res, &payload);
+    __ti_vector_u8_append_slice(&res, BSWORD(psize), 2);
+    __ti_vector_u8_append_vector(&res, &payload);
 
     // checksum
     u16 checksum = _ti_pyfile_get_checksum((char*)res.data, res.len);
-    a_vector_u8_append_slice(&res, BSWORD(checksum), 2);
+    __ti_vector_u8_append_slice(&res, BSWORD(checksum), 2);
 
-    a_vector_u8_free(&payload);
+    __ti_vector_u8_free(&payload);
 
     *dest = (char*)res.data;
     return res.len;
