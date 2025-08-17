@@ -104,11 +104,10 @@ Ti_PyFile ti_pyfile_new_with_metadata_full(const char* src, u16 src_len,
  * May segfault.
  *
  * @param data binary data of TI AppVar
- * @param len length of data
  * @param pres result of the parser, if any. Can be left null
  * @return valid `TiPyFile` on success, invalid `TiPyFile` on error
  */
-Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres);
+Ti_PyFile ti_pyfile_parse(char* data, Ti_ParseResult* pres);
 
 /**
  * Creates an invalid TiPyFile. Used to report errors.
@@ -416,7 +415,7 @@ static u16 _ti_pyfile_get_word(char data[2]) {
     return (u16)((u8)(data[0]) | (u8)data[1] << 8);
 }
 
-Ti_PyFile ti_pyfile_parse(char* data, usize len, Ti_ParseResult* pres) {
+Ti_PyFile ti_pyfile_parse(char* data, Ti_ParseResult* pres) {
     if (!data) {
         if (pres)
             *pres = TI_PARSE_ERROR;

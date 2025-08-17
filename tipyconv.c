@@ -73,6 +73,25 @@ static const struct option LONG_OPTS[] = {
 static Args args;
 
 // === function decls ===
+char* get_file_name(const char* src);
+char* get_file_extension(const char* src);
+bool file_exists(const char* path);
+Format get_format_from_string(const char* ext);
+Format get_format_from_path(const char* path);
+
+Args args_new(void);
+void args_deinit(Args* args);
+void version(void);
+void help(void);
+void license(void);
+bool parse_args(int argc, char** argv);
+
+Format get_output_format(Format in_fmt);
+char* get_python_file_path(const Ti_PyFile* pyfile);
+char* get_var_name_from_path(const char* path);
+bool convert_appvar(const a_string* in_file);
+bool convert_py(const a_string* in_file);
+bool convert(Format in_fmt);
 
 // returns a heap allocated char*
 char* get_file_name(const char* src) {
@@ -105,20 +124,6 @@ bool file_exists(const char* path) {
     return true;
 }
 
-Args args_new(void) {
-    return (Args){
-        .in_path = a_string_with_capacity(25),
-        .out_path = a_string_with_capacity(25),
-        .var_name = a_string_with_capacity(25),
-    };
-}
-
-void args_deinit(Args* args) {
-    a_string_free(&args->in_path);
-    a_string_free(&args->out_path);
-    a_string_free(&args->var_name);
-}
-
 Format get_format_from_string(const char* ext) {
     if (ext == NULL)
         return FMT_INVALID;
@@ -134,6 +139,20 @@ Format get_format_from_string(const char* ext) {
 Format get_format_from_path(const char* path) {
     const char* ext = get_file_extension(path);
     return get_format_from_string(ext);
+}
+
+Args args_new(void) {
+    return (Args){
+        .in_path = a_string_with_capacity(25),
+        .out_path = a_string_with_capacity(25),
+        .var_name = a_string_with_capacity(25),
+    };
+}
+
+void args_deinit(Args* args) {
+    a_string_free(&args->in_path);
+    a_string_free(&args->out_path);
+    a_string_free(&args->var_name);
 }
 
 void version(void) {
@@ -221,10 +240,14 @@ a_string guess_python_file_path(const Ti_PyFile* pyfile) {
         return res;
     }
 
-    if (strlen(pyfile->var_name) == 0)
-        a_string_append(&res, "PYFILE");
-    else
+    if (strlen(pyfile->var_name) == 0) {
+        char* var_name = get_var_name_from_path(args.in_path.data);
+        a_string_append(&res, var_name);
+        free(var_name);
+    } else {
         a_string_append(&res, pyfile->var_name);
+    }
+
     a_string_append(&res, ".py");
 
     return res;
@@ -265,7 +288,7 @@ a_string guess_appvar_path(const Ti_PyFile* pyfile) {
 
 bool convert_appvar(const a_string* in_file) {
     Ti_ParseResult res = {0};
-    Ti_PyFile pyfile = ti_pyfile_parse(in_file->data, in_file->len, &res);
+    Ti_PyFile pyfile = ti_pyfile_parse(in_file->data, &res);
 
     switch (res) {
         case TI_PARSE_OK: {
