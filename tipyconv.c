@@ -64,7 +64,7 @@ typedef struct {
 static const struct option LONG_OPTS[] = {
     {"outfile", required_argument, 0, 'o'},
     {"varname", required_argument, 0, 'N'},
-    {"version", required_argument, 0, 'V'},
+    {"version", no_argument, 0, 'V'},
     {"verbose", no_argument, 0, 'v'},
     {"help", no_argument, 0, 'h'},
     {"license", no_argument, 0, 'l'},

@@ -113,7 +113,7 @@ typedef double f64;
 
 #define not_implemented log_fatal("feature not implemented")
 
-#define VERSION "0.1.0"
+#define VERSION "0.1.1"
 
 #define VERSION_TXT "tipyconv version " VERSION
 
