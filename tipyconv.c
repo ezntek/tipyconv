@@ -21,29 +21,17 @@
 #include <string.h>
 #include <strings.h>
 
-#include "3rdparty/asv/a_string.h"
+#include "3rdparty/include/a_common.h"
 #include "3rdparty/include/a_string.h"
 #include "common.h"
 
 #define _TIPYCONV_IMPLEMENTATION
 #include "tipyconv.h"
 
-#define info(...)                                                              \
+#define _info(...)                                                             \
     {                                                                          \
         if (args.verbose)                                                      \
-            log_info(__VA_ARGS__);                                             \
-    }
-#define warn(...)                                                              \
-    {                                                                          \
-        log_warn(__VA_ARGS__);                                                 \
-    }
-#define error(...)                                                             \
-    {                                                                          \
-        log_error(__VA_ARGS__);                                                \
-    }
-#define fatal(...)                                                             \
-    {                                                                          \
-        log_fatal(__VA_ARGS__);                                                \
+            info(__VA_ARGS__);                                                 \
     }
 
 typedef enum {
@@ -143,16 +131,16 @@ Format get_format_from_path(const char* path) {
 
 Args args_new(void) {
     return (Args){
-        .in_path = a_string_with_capacity(25),
-        .out_path = a_string_with_capacity(25),
-        .var_name = a_string_with_capacity(25),
+        .in_path = as_with_capacity(25),
+        .out_path = as_with_capacity(25),
+        .var_name = as_with_capacity(25),
     };
 }
 
 void args_deinit(Args* args) {
-    a_string_free(&args->in_path);
-    a_string_free(&args->out_path);
-    a_string_free(&args->var_name);
+    as_free(&args->in_path);
+    as_free(&args->out_path);
+    as_free(&args->var_name);
 }
 
 void version(void) {
@@ -177,10 +165,10 @@ bool parse_args(int argc, char** argv) {
     while ((c = getopt_long(argc, argv, "o:N:Vvhl", LONG_OPTS, NULL)) != -1) {
         switch (c) {
             case 'o': {
-                a_string_copy_cstr(&args.out_path, optarg);
+                as_copy_cstr(&args.out_path, optarg);
             } break;
             case 'N': {
-                a_string_copy_cstr(&args.var_name, optarg);
+                as_copy_cstr(&args.var_name, optarg);
             } break;
             case 'V': {
                 version();
@@ -203,11 +191,11 @@ bool parse_args(int argc, char** argv) {
 
     // positional arg: input file
     if (optind >= argc) {
-        error("must supply input file as positional argument!");
+        warn("must supply input file as positional argument!");
         help();
         return false;
     }
-    a_string_copy_cstr(&args.in_path, argv[optind]);
+    as_copy_cstr(&args.in_path, argv[optind]);
 
     if (args.in_path.len == 0)
         fatal("no input file provided");
@@ -231,24 +219,24 @@ Format get_output_format(Format in_fmt) {
 
 a_string guess_python_file_path(const Ti_PyFile* pyfile) {
     if (args.out_path.len != 0)
-        return a_string_dupe(&args.out_path);
+        return as_dupe(&args.out_path);
 
     a_string res = astr("./");
 
     if (pyfile->file_name) {
-        a_string_append(&res, pyfile->file_name);
+        as_append(&res, pyfile->file_name);
         return res;
     }
 
     if (strlen(pyfile->var_name) == 0) {
         char* var_name = get_var_name_from_path(args.in_path.data);
-        a_string_append(&res, var_name);
+        as_append(&res, var_name);
         free(var_name);
     } else {
-        a_string_append(&res, pyfile->var_name);
+        as_append(&res, pyfile->var_name);
     }
 
-    a_string_append(&res, ".py");
+    as_append(&res, ".py");
 
     return res;
 }
@@ -270,18 +258,18 @@ char* get_var_name_from_path(const char* path) {
 // guesses the output path of an AppVar
 a_string guess_appvar_path(const Ti_PyFile* pyfile) {
     if (args.out_path.len != 0)
-        return a_string_dupe(&args.out_path);
+        return as_dupe(&args.out_path);
 
     a_string res = astr("./");
     if (strlen(pyfile->var_name) > 0) {
-        a_string_append(&res, pyfile->var_name);
+        as_append(&res, pyfile->var_name);
     } else {
         warn("AppVar does not have a variable name!");
         char* var_name = get_var_name_from_path(args.in_path.data);
-        a_string_append(&res, var_name);
+        as_append(&res, var_name);
         free(var_name);
     }
-    a_string_append(&res, ".8xv");
+    as_append(&res, ".8xv");
 
     return res;
 }
@@ -292,7 +280,7 @@ bool convert_appvar(const a_string* in_file) {
 
     switch (res) {
         case TI_PARSE_OK: {
-            info("successfully parsed");
+            _info("successfully parsed");
         } break;
         case TI_PARSE_ERROR: {
             fatal("failed to parse AppVar!");
@@ -318,10 +306,10 @@ bool convert_appvar(const a_string* in_file) {
     usize bytes_written = fwrite(pyfile.src, 1, pyfile.src_len, out_fp);
     if (bytes_written < pyfile.src_len)
         fatal("short write-out on Python file at \"%s\"", out_path.data);
-    info("file written to \"%s\"", out_path.data);
+    _info("file written to \"%s\"", out_path.data);
 
     ti_pyfile_free(&pyfile);
-    a_string_free(&out_path);
+    as_free(&out_path);
     return true;
 }
 
@@ -350,33 +338,33 @@ bool convert_py(const a_string* in_file) {
     usize bytes_written = fwrite(buf, 1, len, fp);
     if (bytes_written < len)
         panic("short write-out on AppVar!");
-    info("file written to \"%s\"", out_path.data);
+    _info("file written to \"%s\"", out_path.data);
 
     free(buf);
     fclose(fp);
     free(var_name);
     ti_pyfile_free(&pyfile);
-    a_string_free(&out_path);
+    as_free(&out_path);
 
     return true;
 }
 
 bool convert(Format in_fmt) {
-    a_string in_file = a_string_read_file(args.in_path.data);
-    if (!a_string_valid(&in_file)) {
-        error("failed to read input file: \"%s\"",
-              strerror(errno)) return false;
+    a_string in_file = as_read_file(args.in_path.data);
+    if (!as_valid(&in_file)) {
+        warn("failed to read input file: \"%s\"", strerror(errno));
+        return false;
     }
-    info("loaded file \"%s\"", args.in_path.data);
+    _info("loaded file \"%s\"", args.in_path.data);
 
     switch (in_fmt) {
         case FMT_APPVAR: {
-            info("converting from AppVar to Python");
+            _info("converting from AppVar to Python");
             if (!convert_appvar(&in_file))
                 return false;
         } break;
         case FMT_PY: {
-            info("converting from Python to AppVar");
+            _info("converting from Python to AppVar");
             if (!convert_py(&in_file))
                 return false;
         } break;
@@ -384,7 +372,7 @@ bool convert(Format in_fmt) {
             break;
     }
 
-    a_string_free(&in_file);
+    as_free(&in_file);
     return true;
 }
 
